@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import calendar
 from googleapiclient.discovery import build
 import time
+import os
 
 # Page configuration
 st.set_page_config(
@@ -36,20 +37,21 @@ COLUMNS_TO_RETURN = {
 @st.cache_resource
 def init_google_sheets():
     """Initialize Google Sheets connection (cached)"""
-# Check if running on Streamlit Cloud or locally
-if 'STREAMLIT_SHARING_MODE' in st.secrets:
-    # Running on Streamlit Cloud - use secrets
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(
-        st.secrets["gcp_service_account"], scope
-    )
-else:
-    # Running locally - use file
-    creds = ServiceAccountCredentials.from_json_keyfile_name('your-credentials.json', scope)
+    # Check if running on Streamlit Cloud or locally
+    if hasattr(st, 'secrets') and 'gcp_service_account' in st.secrets:
+        # Running on Streamlit Cloud - use secrets
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(
+            dict(st.secrets["gcp_service_account"]), scope
+        )
+    else:
+        # Running locally - use file
+        creds = ServiceAccountCredentials.from_json_keyfile_name('your-credentials.json', scope)
+    
     client = gspread.authorize(creds)
     service = build('sheets', 'v4', credentials=creds)
     spreadsheet_id = '1lXwHECkQJy7h87L5oKbo0hDTpalDgKFTbBQJ4pIerFo'
     spreadsheet = client.open_by_key(spreadsheet_id)
-    return service, spreadsheet
+    return service, spreadsheet, spreadsheet_id
 
 def get_column_indices(column_letters):
     """Convert column letters to zero-based indices"""
@@ -273,10 +275,10 @@ def main():
     
     # Initialize Google Sheets
     try:
-        service, spreadsheet = init_google_sheets()
-        spreadsheet_id = '1lXwHECkQJy7h87L5oKbo0hDTpalDgKFTbBQJ4pIerFo'
+        service, spreadsheet, spreadsheet_id = init_google_sheets()
     except Exception as e:
         st.error(f"Failed to connect to Google Sheets: {str(e)}")
+        st.info("Make sure your credentials are set up correctly in Streamlit secrets or as 'your-credentials.json' file locally.")
         return
     
     # Sidebar for year selection
@@ -418,7 +420,7 @@ def main():
                     day_count += 1
                     progress_bar.progress(day_count / total_days)
                     status_text.text(f"Checking {day_count}/{total_days} days...")
-                    time.sleep(0.05)  # Small delay to avoid rate limits
+                    time.sleep(0.05)
                 
                 progress_bar.empty()
                 status_text.empty()
