@@ -209,7 +209,10 @@ def analyze_availability(selected_data, date_obj, year=None):
 def get_date_availability_data(sheet_name, month_day, service, spreadsheet, spreadsheet_id):
     """
     Get availability data for a specific date
-    Returns: dict with date info and availability, or None if date not found
+    Returns: 
+        - dict with date info and availability if found
+        - {'error': 'invalid_format'} if date format is invalid
+        - {'error': 'not_found', 'formatted_date': 'Mon 1/1'} if valid format but no data
     """
     try:
         sheet = spreadsheet.worksheet(sheet_name)
@@ -220,7 +223,7 @@ def get_date_availability_data(sheet_name, month_day, service, spreadsheet, spre
             date_obj = datetime.strptime(full_date_str, "%Y-%m-%d")
             formatted_date = f"{calendar.day_name[date_obj.weekday()][:3]} {date_obj.month}/{date_obj.day}"
         except ValueError:
-            return None
+            return {'error': 'invalid_format'}
 
         if formatted_date in dates:
             row_number = dates.index(formatted_date) + 1
@@ -266,6 +269,6 @@ def get_date_availability_data(sheet_name, month_day, service, spreadsheet, spre
                 'availability': availability
             }
         else:
-            return None
+            return {'error': 'not_found', 'formatted_date': formatted_date}
     except gspread.exceptions.WorksheetNotFound:
-        return None
+        return {'error': 'worksheet_not_found'}
