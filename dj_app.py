@@ -111,7 +111,17 @@ def main():
             month_day = date_input.strftime("%m-%d")
             data = get_date_availability_data(year, month_day, service, spreadsheet, spreadsheet_id)
             
-            if data:
+            # Handle different error types
+            if isinstance(data, dict) and 'error' in data:
+                if data['error'] == 'invalid_format':
+                    st.error("Invalid date format. This shouldn't happen with the date picker.")
+                elif data['error'] == 'not_found':
+                    st.warning(f"No entry found for {data['formatted_date']} in the {year} availability sheet.")
+                elif data['error'] == 'worksheet_not_found':
+                    st.error(f"The {year} worksheet was not found in the spreadsheet.")
+                else:
+                    st.error("An error occurred while checking availability.")
+            elif data:
                 st.success(f"**Date:** {data['formatted_date']}")
                 
                 # Display DJ statuses
@@ -153,7 +163,7 @@ def main():
                 if availability['available_booking']:
                     st.info(f"**Available DJs:** {', '.join(availability['available_booking'])}")
             else:
-                st.error("No data found for this date.")
+                st.error("Unexpected error occurred.")
     
     # Option 2: Query Date Range
     elif option == "Query Date Range":
@@ -210,7 +220,8 @@ def main():
                     
                     if include_date:
                         data = get_date_availability_data(year, month_day, service, spreadsheet, spreadsheet_id)
-                        if data:
+                        # Skip if error or no data
+                        if data and isinstance(data, dict) and 'date_obj' in data:
                             results.append({
                                 'date': data['formatted_date'],
                                 'available_spots': data['availability']['available_spots'],
