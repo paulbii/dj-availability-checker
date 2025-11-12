@@ -50,7 +50,7 @@ def format_dj_status_html(dj_name, value, date_obj, is_bookable, is_backup, year
         return f"<span style='color: #0000FF;'>{dj_name}: {value}</span>"
     
     if dj_name == "Felipe" and year == "2026" and (not value or value.strip() == ""):
-        return f"{dj_name}: - not available"
+        return f"<span style='color: #0000FF;'>{dj_name}: [BLANK] - can backup</span>"
     
     if value and value_lower == "last":
         return f"<span style='color: #00AA00;'>{dj_name}: {value} - available (low priority)</span>"
@@ -312,7 +312,8 @@ def main():
                     
                     if include_date:
                         data = get_date_availability_data(year, month_day, service, spreadsheet, spreadsheet_id)
-                        if data and data['availability']['available_spots'] >= min_spots:
+                        # Skip if error or no data
+                        if data and isinstance(data, dict) and 'date_obj' in data and data['availability']['available_spots'] >= min_spots:
                             results.append({
                                 'date': data['formatted_date'],
                                 'available_spots': data['availability']['available_spots'],
@@ -387,7 +388,8 @@ def main():
                     month_day = current_date.strftime("%m-%d")
                     data = get_date_availability_data(year, month_day, service, spreadsheet, spreadsheet_id)
                     
-                    if data and dj_name in data['selected_data']:
+                    # Skip if error or no data
+                    if data and isinstance(data, dict) and 'date_obj' in data and dj_name in data['selected_data']:
                         value = data['selected_data'][dj_name]
                         is_bold = "(BOLD)" in value if value else False
                         clean_value = value.replace(" (BOLD)", "") if value else ""
