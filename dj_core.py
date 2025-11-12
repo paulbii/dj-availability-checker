@@ -90,14 +90,15 @@ def check_dj_availability(dj_name, value, date_obj=None, is_bold=False, year=Non
     # Special handling for Felipe in 2026
     if dj_name == "Felipe" and year == "2026":
         if not value:  # Empty cell in 2026
-            return False, False  # Not available for booking or backup
+            return False, True  # Available for backup only (default)
+        if value_lower == "ok":
+            return True, True  # Special exception - can be booked AND backup
         if value_lower == "dad" or value_lower == "ok to backup":
             return False, True  # Available for backup only
         if value_lower == "out" or value_lower == "maxed":
-            return False, False
-        # Any other explicit status for Felipe in 2026 should be evaluated
-        # but he's never available for booking in 2026
-        return False, False
+            return False, False  # Not available at all
+        # Any other status - default to backup only
+        return False, True
         
     if not value:  # Blank cell (for non-2026 Felipe cases)
         if dj_name == "Stefano":
@@ -270,5 +271,4 @@ def get_date_availability_data(sheet_name, month_day, service, spreadsheet, spre
             }
         else:
             return {'error': 'not_found', 'formatted_date': formatted_date}
-    except gspread.exceptions.WorksheetNotFound:
-        return {'error': 'worksheet_not_found'}
+    except gspread.exceptions.WorksheetNotF
