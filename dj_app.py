@@ -354,12 +354,14 @@ def main():
         if cache_info:
             st.markdown("---")
             age = cache_info['age_minutes']
-            if age == 0:
+            cache_time = cache_info['cache_time']
+            
+            if age == 0 or cache_time == 'Just now':
                 st.info("ℹ️ **Gig database:** Fresh data (just fetched)")
             elif age < 5:
-                st.info(f"ℹ️ **Gig database:** Cached from {cache_info['cache_time']} ({age} min ago) - Fresh!")
+                st.info(f"ℹ️ **Gig database:** Cached from {cache_time} ({age} min ago) - Fresh!")
             else:
-                st.info(f"ℹ️ **Gig database:** Cached from {cache_info['cache_time']} ({age} min ago)")
+                st.info(f"ℹ️ **Gig database:** Cached from {cache_time} ({age} min ago)")
                 st.caption("💡 Click 🔄 Refresh button to fetch fresh data")
     
     # Sidebar with instructions

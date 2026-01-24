@@ -13,6 +13,11 @@ import requests
 from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# Global variable to track when cache was first populated
+_cache_first_used = None
+from functools import lru_cache
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 # Global variables and setup
 SCOPE = [
     "https://spreadsheets.google.com/feeds",
@@ -192,6 +197,12 @@ def get_gig_database_bookings_cached(year, month_day, cache_time):
     Returns:
         Same as get_gig_database_bookings
     """
+    global _cache_first_used
+    
+    # Track when cache was first populated this session
+    if _cache_first_used is None:
+        _cache_first_used = datetime.now()
+    
     return get_gig_database_bookings(year, month_day)
 
 
@@ -204,28 +215,37 @@ def get_cache_info():
     """Get cache statistics for display"""
     cache_info = get_gig_database_bookings_cached.cache_info()
     current_time = datetime.now()
-    cache_hour = get_cache_time()
     
-    # Parse the hour to show when cache was created
-    try:
-        cache_dt = datetime.strptime(cache_hour, "%Y-%m-%d-%H")
-        age_minutes = int((current_time - cache_dt).total_seconds() / 60)
-        cache_time_str = cache_dt.strftime("%I:%M %p").lstrip('0')  # "2:00 PM"
-        
+    # If no cache hits yet, data is fresh
+    if cache_info.hits == 0 or _cache_first_used is None:
         return {
-            'hits': cache_info.hits,
+            'hits': 0,
             'misses': cache_info.misses,
             'size': cache_info.currsize,
-            'age_minutes': age_minutes,
-            'cache_time': cache_time_str,
-            'is_fresh': age_minutes < 5  # Fresh if less than 5 minutes old
+            'age_minutes': 0,
+            'cache_time': 'Just now',
+            'is_fresh': True
         }
-    except:
-        return None
+    
+    # Calculate actual age from when cache was first used
+    age_seconds = (current_time - _cache_first_used).total_seconds()
+    age_minutes = int(age_seconds / 60)
+    cache_time_str = _cache_first_used.strftime("%I:%M %p").lstrip('0')
+    
+    return {
+        'hits': cache_info.hits,
+        'misses': cache_info.misses,
+        'size': cache_info.currsize,
+        'age_minutes': age_minutes,
+        'cache_time': cache_time_str,
+        'is_fresh': age_minutes < 5
+    }
 
 
 def clear_gig_cache():
     """Clear the gig database cache (force refresh)"""
+    global _cache_first_used
+    _cache_first_used = None
     get_gig_database_bookings_cached.cache_clear()
 
 

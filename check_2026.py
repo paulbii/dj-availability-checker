@@ -212,8 +212,8 @@ def check_availability(sheet_name, month_day_to_check, service, spreadsheet, spr
     cache_info = get_cache_info()
     if cache_info:
         age = cache_info['age_minutes']
-        if age == 0:
-            cache_msg = f"{Fore.CYAN}ℹ Gig database: Fresh data{Style.RESET_ALL}"
+        if age == 0 or cache_info['cache_time'] == 'Just now':
+            cache_msg = f"{Fore.CYAN}ℹ Gig database: Fresh data (just fetched){Style.RESET_ALL}"
         else:
             cache_msg = f"{Fore.CYAN}ℹ Gig database: Cached from {cache_info['cache_time']} ({age} min ago){Style.RESET_ALL}"
         response.append(f"\n{cache_msg}")
