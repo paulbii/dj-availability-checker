@@ -573,17 +573,30 @@ def main(sheet_name):
         elif choice == "5":
             while True:
                 print(f"\n{Fore.YELLOW}Tip: Leave dates blank to check the entire year{Style.RESET_ALL}")
+                
+                # Get start date
                 start_date = input(f"Enter start date (MM-DD) or press Enter for beginning of year: ").strip()
                 if not start_date:
                     start_date = "01-01"
                 else:
-                    start_date = get_valid_date("", year, start_date)
+                    # Validate the entered date
+                    try:
+                        datetime.strptime(f"{year}-{start_date}", "%Y-%m-%d")
+                    except ValueError:
+                        print(f"{Fore.RED}Invalid format. Using 01-01 instead.{Style.RESET_ALL}")
+                        start_date = "01-01"
                 
+                # Get end date
                 end_date = input(f"Enter end date (MM-DD) or press Enter for end of year: ").strip()
                 if not end_date:
                     end_date = "12-31"
                 else:
-                    end_date = get_valid_date("", year, end_date)
+                    # Validate the entered date
+                    try:
+                        datetime.strptime(f"{year}-{end_date}", "%Y-%m-%d")
+                    except ValueError:
+                        print(f"{Fore.RED}Invalid format. Using 12-31 instead.{Style.RESET_ALL}")
+                        end_date = "12-31"
                 
                 result = show_fully_booked_dates(sheet_name, start_date, end_date, service, spreadsheet, spreadsheet_id)
                 if result:
