@@ -18,6 +18,7 @@ except ImportError:
             self.YELLOW = ''
             self.BLUE = ''
             self.RED = ''
+            self.CYAN = ''
             self.RESET_ALL = ''
             self.BRIGHT = ''
     
@@ -424,39 +425,56 @@ def show_fully_booked_dates(sheet_name, start_date_str, end_date_str, service, s
     if fully_booked is None:
         return f"{Fore.RED}Error fetching data from {sheet_name} sheet.{Style.RESET_ALL}"
     
-    output = ["\n" + "=" * 50]
+    output = ["\n" + "=" * 60]
     output.append(f"FULLY BOOKED DATES - {sheet_name}")
     output.append(f"Date range: {start_date_str} to {end_date_str}")
-    output.append("=" * 50 + "\n")
+    output.append("=" * 60 + "\n")
     
     if not fully_booked:
         output.append(f"{Fore.GREEN}No fully booked dates found in this range!{Style.RESET_ALL}")
-        output.append("\n" + "=" * 50)
+        output.append("\n" + "=" * 60)
         return "\n".join(output)
     
     output.append(f"{Fore.RED}Found {len(fully_booked)} fully booked date(s):{Style.RESET_ALL}\n")
     
     for booking in fully_booked:
-        output.append(f"{Fore.RED}{booking['date']}{Style.RESET_ALL}")
-        output.append(f"  Total bookings: {booking['booked_count']}")
+        output.append("-" * 60)
+        output.append(f"{Fore.RED}{Style.BRIGHT}{booking['date']}{Style.RESET_ALL}")
         
+        # Booked DJs
         if booking['booked_djs']:
-            output.append(f"  Booked DJs: {', '.join(booking['booked_djs'])}")
+            output.append(f"  {Fore.RED}Booked:{Style.RESET_ALL} {', '.join(booking['booked_djs'])}")
         
+        # TBA bookings
         if booking['tba_count'] > 0:
-            output.append(f"  TBA bookings: {booking['tba_count']}")
+            output.append(f"  {Fore.RED}TBA Bookings:{Style.RESET_ALL} {booking['tba_count']}")
         
-        if booking.get('aag_reserved', False):
-            output.append(f"  AAG: RESERVED")
+        # AAG status
+        if booking.get('aag_status'):
+            aag_val = booking['aag_status']
+            if 'reserved' in aag_val.lower():
+                output.append(f"  {Fore.RED}AAG:{Style.RESET_ALL} {aag_val}")
+            else:
+                output.append(f"  AAG: {aag_val}")
         
-        if booking['backup_count'] > 0:
-            output.append(f"  Backup assigned: {booking['backup_count']}")
+        # Backup assigned
+        if booking['backup_assigned']:
+            output.append(f"  {Fore.BLUE}Backup Assigned:{Style.RESET_ALL} {', '.join(booking['backup_assigned'])}")
+        
+        # Available to book (including Stefano MAYBE)
+        if booking['available_to_book']:
+            output.append(f"  {Fore.GREEN}Available to Book:{Style.RESET_ALL} {', '.join(booking['available_to_book'])}")
+        
+        # Available to backup
+        if booking['available_to_backup']:
+            output.append(f"  {Fore.CYAN}Available to Backup:{Style.RESET_ALL} {', '.join(booking['available_to_backup'])}")
         
         output.append("")  # Blank line between dates
     
-    output.append("=" * 50)
+    output.append("=" * 60)
     output.append(f"\n{Fore.YELLOW}TIP: Review your open inquiries for these dates to notify couples.{Style.RESET_ALL}")
-    output.append("=" * 50)
+    output.append(f"{Fore.YELLOW}     [MAYBE] = Stefano blank cell - may be available if asked.{Style.RESET_ALL}")
+    output.append("=" * 60)
     
     return "\n".join(output)
 

@@ -164,6 +164,7 @@ def get_fully_booked_dates(year, service, spreadsheet, spreadsheet_id, start_dat
             
             # Build selected_data dict for this row
             selected_data = {}
+            bold_status = {}
             
             for label, index in column_indices.items():
                 if index < len(row_values):
@@ -183,34 +184,69 @@ def get_fully_booked_dates(year, service, spreadsheet, spreadsheet_id, start_dat
                                     for run in cell_format['textFormatRuns']
                                 )
                     
+                    bold_status[label] = is_bold
                     if is_bold and label != "Date":
                         selected_data[label] = f"{cell_value} (BOLD)"
                     else:
                         selected_data[label] = cell_value
                 else:
                     selected_data[label] = ""
+                    bold_status[label] = False
             
             # Analyze availability for this date
             availability = analyze_availability(selected_data, date_obj, year)
             
             # If fully booked (no available spots), add to results
             if availability['available_spots'] == 0:
-                # Build a list of who's booked
+                # Build detailed DJ status lists
                 booked_djs = []
-                for label, value in selected_data.items():
-                    if label in ["Date", "TBA", "AAG"]:
+                backup_assigned = []
+                available_to_book = []
+                available_to_backup = []
+                
+                # List of actual DJs (exclude Date, TBA, AAG)
+                dj_names = ["Henry", "Woody", "Paul", "Stefano", "Felipe", "Stephanie"]
+                
+                for dj_name in dj_names:
+                    if dj_name not in selected_data:
                         continue
+                    
+                    value = selected_data.get(dj_name, "")
                     value_str = str(value).replace(" (BOLD)", "") if value else ""
-                    if value_str.lower() == "booked":
-                        booked_djs.append(label)
+                    value_lower = value_str.lower()
+                    is_bold = bold_status.get(dj_name, False)
+                    
+                    if value_lower == "booked":
+                        booked_djs.append(dj_name)
+                    elif value_lower == "backup":
+                        backup_assigned.append(dj_name)
+                    else:
+                        # Special case: Stefano with blank cell = MAYBE (not in system but potentially available)
+                        if dj_name == "Stefano" and (not value_str or value_str.strip() == ""):
+                            available_to_book.append(f"{dj_name} [MAYBE]")
+                            continue
+                        
+                        # Check availability using existing logic
+                        can_book, can_backup = check_dj_availability(dj_name, value_str, date_obj, is_bold, year)
+                        if can_book:
+                            available_to_book.append(dj_name)
+                        elif can_backup:
+                            available_to_backup.append(dj_name)
+                
+                # Get AAG status
+                aag_status = selected_data.get("AAG", "")
                 
                 fully_booked.append({
                     'date': date_str,
                     'date_obj': date_obj,
                     'booked_djs': booked_djs,
+                    'backup_assigned': backup_assigned,
+                    'available_to_book': available_to_book,
+                    'available_to_backup': available_to_backup,
                     'booked_count': availability['booked_count'],
                     'tba_count': availability['tba_bookings'],
                     'backup_count': availability['backup_count'],
+                    'aag_status': aag_status,
                     'aag_reserved': availability.get('aag_reserved', False)
                 })
         
