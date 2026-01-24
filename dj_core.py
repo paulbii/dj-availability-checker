@@ -90,6 +90,138 @@ def get_columns_for_year(year):
         return COLUMNS_2025
 
 
+def get_fully_booked_dates(year, service, spreadsheet, spreadsheet_id, start_date=None, end_date=None):
+    """
+    Get all dates with zero available spots (fully booked).
+    Optimized to avoid rate limits by fetching all data in bulk.
+    
+    Args:
+        year: Sheet name (e.g., "2026", "2027")
+        service: Google Sheets API service
+        spreadsheet: Spreadsheet object
+        spreadsheet_id: ID of the spreadsheet
+        start_date: Optional datetime to filter from (inclusive)
+        end_date: Optional datetime to filter to (inclusive)
+    
+    Returns:
+        List of dicts with date info and booking details for fully booked dates
+    """
+    try:
+        sheet = spreadsheet.worksheet(year)
+        columns = get_columns_for_year(year)
+        
+        # Determine the range to fetch based on column letters
+        max_col = max(columns.keys())
+        range_notation = f"{year}!A2:{max_col}400"  # Fetch up to row 400 to cover the whole year
+        
+        # Fetch all values in ONE API call
+        all_values = sheet.get(range_notation)
+        
+        # Fetch all formatting in ONE API call
+        request = service.spreadsheets().get(
+            spreadsheetId=spreadsheet_id,
+            ranges=range_notation,
+            includeGridData=True
+        )
+        response = request.execute()
+        
+        # Extract formatting data
+        formatting_data = []
+        if 'sheets' in response and len(response['sheets']) > 0:
+            if 'data' in response['sheets'][0] and len(response['sheets'][0]['data']) > 0:
+                if 'rowData' in response['sheets'][0]['data'][0]:
+                    formatting_data = response['sheets'][0]['data'][0]['rowData']
+        
+        # Get column indices
+        column_indices = {label: ord(col) - ord('A') for col, label in columns.items()}
+        
+        # Process each row
+        fully_booked = []
+        
+        for row_idx, row_values in enumerate(all_values):
+            # Skip empty rows or rows without a date
+            if not row_values or len(row_values) == 0:
+                continue
+            
+            date_str = row_values[0] if len(row_values) > 0 else ""
+            if not date_str:
+                continue
+            
+            # Parse the date
+            try:
+                # Date format is like "Sat 1/4" - need to add the year
+                full_date_str = f"{year}-{date_str.split()[-1]}"  # Get "1/4" part
+                date_obj = datetime.strptime(full_date_str, "%Y-%m/%d")
+            except (ValueError, IndexError):
+                continue
+            
+            # Apply date filters if provided
+            if start_date and date_obj < start_date:
+                continue
+            if end_date and date_obj > end_date:
+                continue
+            
+            # Build selected_data dict for this row
+            selected_data = {}
+            
+            for label, index in column_indices.items():
+                if index < len(row_values):
+                    cell_value = row_values[index]
+                    is_bold = False
+                    
+                    # Check formatting if available
+                    if row_idx < len(formatting_data):
+                        row_format = formatting_data[row_idx].get('values', [])
+                        if index < len(row_format):
+                            cell_format = row_format[index]
+                            if 'effectiveFormat' in cell_format:
+                                is_bold = cell_format['effectiveFormat'].get('textFormat', {}).get('bold', False)
+                            if 'textFormatRuns' in cell_format:
+                                is_bold = is_bold or any(
+                                    run.get('format', {}).get('bold', False) 
+                                    for run in cell_format['textFormatRuns']
+                                )
+                    
+                    if is_bold and label != "Date":
+                        selected_data[label] = f"{cell_value} (BOLD)"
+                    else:
+                        selected_data[label] = cell_value
+                else:
+                    selected_data[label] = ""
+            
+            # Analyze availability for this date
+            availability = analyze_availability(selected_data, date_obj, year)
+            
+            # If fully booked (no available spots), add to results
+            if availability['available_spots'] == 0:
+                # Build a list of who's booked
+                booked_djs = []
+                for label, value in selected_data.items():
+                    if label in ["Date", "TBA", "AAG"]:
+                        continue
+                    value_str = str(value).replace(" (BOLD)", "") if value else ""
+                    if value_str.lower() == "booked":
+                        booked_djs.append(label)
+                
+                fully_booked.append({
+                    'date': date_str,
+                    'date_obj': date_obj,
+                    'booked_djs': booked_djs,
+                    'booked_count': availability['booked_count'],
+                    'tba_count': availability['tba_bookings'],
+                    'backup_count': availability['backup_count'],
+                    'aag_reserved': availability.get('aag_reserved', False)
+                })
+        
+        return fully_booked
+        
+    except gspread.exceptions.WorksheetNotFound:
+        return None
+    except Exception as e:
+        print(f"Error fetching fully booked dates: {e}")
+        return None
+
+
 def init_google_sheets_from_file(credentials_file='your-credentials.json'):
     """Initialize Google Sheets connection from credentials file"""
     creds = ServiceAccountCredentials.from_json_keyfile_name(credentials_file, SCOPE)

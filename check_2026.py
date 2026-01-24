@@ -37,7 +37,8 @@ from dj_core import (
     check_dj_availability,
     is_weekend,
     get_cache_info,
-    clear_gig_cache
+    clear_gig_cache,
+    get_fully_booked_dates
 )
 
 
@@ -405,6 +406,61 @@ def query_dj_availability(sheet_name, dj_name, start_date_str, end_date_str, ser
     return "\n".join(output)
 
 
+def show_fully_booked_dates(sheet_name, start_date_str, end_date_str, service, spreadsheet, spreadsheet_id):
+    """Display all dates with zero available spots"""
+    start_date, end_date = parse_date_range(start_date_str, end_date_str, sheet_name)
+    
+    if not start_date or not end_date:
+        return "Invalid date format. Please use MM-DD format for both dates."
+    
+    if start_date > end_date:
+        print(f"{Fore.RED}Start date must be before or equal to end date.{Style.RESET_ALL}")
+        return ""
+    
+    print(f"\n{Fore.YELLOW}Fetching all dates in range... (this will take a few seconds){Style.RESET_ALL}")
+    
+    fully_booked = get_fully_booked_dates(sheet_name, service, spreadsheet, spreadsheet_id, start_date, end_date)
+    
+    if fully_booked is None:
+        return f"{Fore.RED}Error fetching data from {sheet_name} sheet.{Style.RESET_ALL}"
+    
+    output = ["\n" + "=" * 50]
+    output.append(f"FULLY BOOKED DATES - {sheet_name}")
+    output.append(f"Date range: {start_date_str} to {end_date_str}")
+    output.append("=" * 50 + "\n")
+    
+    if not fully_booked:
+        output.append(f"{Fore.GREEN}No fully booked dates found in this range!{Style.RESET_ALL}")
+        output.append("\n" + "=" * 50)
+        return "\n".join(output)
+    
+    output.append(f"{Fore.RED}Found {len(fully_booked)} fully booked date(s):{Style.RESET_ALL}\n")
+    
+    for booking in fully_booked:
+        output.append(f"{Fore.RED}{booking['date']}{Style.RESET_ALL}")
+        output.append(f"  Total bookings: {booking['booked_count']}")
+        
+        if booking['booked_djs']:
+            output.append(f"  Booked DJs: {', '.join(booking['booked_djs'])}")
+        
+        if booking['tba_count'] > 0:
+            output.append(f"  TBA bookings: {booking['tba_count']}")
+        
+        if booking.get('aag_reserved', False):
+            output.append(f"  AAG: RESERVED")
+        
+        if booking['backup_count'] > 0:
+            output.append(f"  Backup assigned: {booking['backup_count']}")
+        
+        output.append("")  # Blank line between dates
+    
+    output.append("=" * 50)
+    output.append(f"\n{Fore.YELLOW}TIP: Review your open inquiries for these dates to notify couples.{Style.RESET_ALL}")
+    output.append("=" * 50)
+    
+    return "\n".join(output)
+
+
 def display_menu():
     """Display the main menu options"""
     print("\n" + "=" * 50)
@@ -414,7 +470,8 @@ def display_menu():
     print("2. Query date range")
     print("3. Find dates with minimum availability")
     print("4. Check DJ availability in range")
-    print("5. Exit")
+    print("5. List fully booked dates")
+    print("6. Exit")
     print("=" * 50)
 
 
@@ -429,7 +486,7 @@ def main(sheet_name):
     
     while True:
         display_menu()
-        choice = input("\nSelect an option (1-5): ").strip()
+        choice = input("\nSelect an option (1-6): ").strip()
         
         if choice == "1":
             while True:
@@ -494,13 +551,36 @@ def main(sheet_name):
                 next_action = input("\nWhat would you like to do?\n  1. Check another DJ\n  2. Return to main menu\nChoice (1-2): ").strip()
                 if next_action != "1":
                     break
-            
+        
         elif choice == "5":
+            while True:
+                print(f"\n{Fore.YELLOW}Tip: Leave dates blank to check the entire year{Style.RESET_ALL}")
+                start_date = input(f"Enter start date (MM-DD) or press Enter for beginning of year: ").strip()
+                if not start_date:
+                    start_date = "01-01"
+                else:
+                    start_date = get_valid_date("", year, start_date)
+                
+                end_date = input(f"Enter end date (MM-DD) or press Enter for end of year: ").strip()
+                if not end_date:
+                    end_date = "12-31"
+                else:
+                    end_date = get_valid_date("", year, end_date)
+                
+                result = show_fully_booked_dates(sheet_name, start_date, end_date, service, spreadsheet, spreadsheet_id)
+                if result:
+                    print(result)
+                
+                next_action = input("\nWhat would you like to do?\n  1. Check another date range\n  2. Return to main menu\nChoice (1-2): ").strip()
+                if next_action != "1":
+                    break
+            
+        elif choice == "6":
             print("\nGoodbye!")
             break
             
         else:
-            print("Invalid option. Please select 1-5.")
+            print("Invalid option. Please select 1-6.")
 
 
 if __name__ == "__main__":
