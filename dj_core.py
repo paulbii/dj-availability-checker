@@ -106,6 +106,37 @@ def get_fully_booked_dates(year, service, spreadsheet, spreadsheet_id, start_dat
     Returns:
         List of dicts with date info and booking details for fully booked dates
     """
+    # Use the bulk fetch function
+    all_data = get_bulk_availability_data(year, service, spreadsheet, spreadsheet_id, start_date, end_date)
+    
+    if all_data is None:
+        return None
+    
+    # Filter for fully booked dates only
+    fully_booked = []
+    for date_info in all_data:
+        if date_info['availability']['available_spots'] == 0:
+            fully_booked.append(date_info)
+    
+    return fully_booked
+
+
+def get_bulk_availability_data(year, service, spreadsheet, spreadsheet_id, start_date=None, end_date=None):
+    """
+    Fetch all availability data in bulk (2 API calls total).
+    This is the optimized function that avoids rate limits.
+    
+    Args:
+        year: Sheet name (e.g., "2026", "2027")
+        service: Google Sheets API service
+        spreadsheet: Spreadsheet object
+        spreadsheet_id: ID of the spreadsheet
+        start_date: Optional datetime to filter from (inclusive)
+        end_date: Optional datetime to filter to (inclusive)
+    
+    Returns:
+        List of dicts with full date info and availability for all dates in range
+    """
     try:
         sheet = spreadsheet.worksheet(year)
         columns = get_columns_for_year(year)
@@ -137,7 +168,7 @@ def get_fully_booked_dates(year, service, spreadsheet, spreadsheet_id, start_dat
         column_indices = {label: ord(col) - ord('A') for col, label in columns.items()}
         
         # Process each row
-        fully_booked = []
+        all_dates = []
         
         for row_idx, row_values in enumerate(all_values):
             # Skip empty rows or rows without a date
@@ -196,69 +227,67 @@ def get_fully_booked_dates(year, service, spreadsheet, spreadsheet_id, start_dat
             # Analyze availability for this date
             availability = analyze_availability(selected_data, date_obj, year)
             
-            # If fully booked (no available spots), add to results
-            if availability['available_spots'] == 0:
-                # Build detailed DJ status lists
-                booked_djs = []
-                backup_assigned = []
-                available_to_book = []
-                available_to_backup = []
+            # Build detailed DJ status lists
+            booked_djs = []
+            backup_assigned = []
+            available_to_book = []
+            available_to_backup = []
+            
+            # List of actual DJs (exclude Date, TBA, AAG)
+            dj_names = ["Henry", "Woody", "Paul", "Stefano", "Felipe", "Stephanie"]
+            
+            for dj_name in dj_names:
+                if dj_name not in selected_data:
+                    continue
                 
-                # List of actual DJs (exclude Date, TBA, AAG)
-                dj_names = ["Henry", "Woody", "Paul", "Stefano", "Felipe", "Stephanie"]
+                value = selected_data.get(dj_name, "")
+                value_str = str(value).replace(" (BOLD)", "") if value else ""
+                value_lower = value_str.lower()
+                is_bold = bold_status.get(dj_name, False)
                 
-                for dj_name in dj_names:
-                    if dj_name not in selected_data:
+                if value_lower == "booked":
+                    booked_djs.append(dj_name)
+                elif value_lower == "backup":
+                    backup_assigned.append(dj_name)
+                elif value_lower == "reserved":
+                    # Stephanie can have RESERVED status
+                    booked_djs.append(f"{dj_name} (RESERVED)")
+                else:
+                    # Special case: Stefano with blank cell = MAYBE (not in system but potentially available)
+                    if dj_name == "Stefano" and (not value_str or value_str.strip() == ""):
+                        available_to_book.append(f"{dj_name} [MAYBE]")
                         continue
                     
-                    value = selected_data.get(dj_name, "")
-                    value_str = str(value).replace(" (BOLD)", "") if value else ""
-                    value_lower = value_str.lower()
-                    is_bold = bold_status.get(dj_name, False)
-                    
-                    if value_lower == "booked":
-                        booked_djs.append(dj_name)
-                    elif value_lower == "backup":
-                        backup_assigned.append(dj_name)
-                    elif value_lower == "reserved":
-                        # Stephanie can have RESERVED status
-                        booked_djs.append(f"{dj_name} (RESERVED)")
-                    else:
-                        # Special case: Stefano with blank cell = MAYBE (not in system but potentially available)
-                        if dj_name == "Stefano" and (not value_str or value_str.strip() == ""):
-                            available_to_book.append(f"{dj_name} [MAYBE]")
-                            continue
-                        
-                        # Check availability using existing logic
-                        can_book, can_backup = check_dj_availability(dj_name, value_str, date_obj, is_bold, year)
-                        if can_book:
-                            available_to_book.append(dj_name)
-                        elif can_backup:
-                            available_to_backup.append(dj_name)
-                
-                # Get AAG status
-                aag_status = selected_data.get("AAG", "")
-                
-                fully_booked.append({
-                    'date': date_str,
-                    'date_obj': date_obj,
-                    'booked_djs': booked_djs,
-                    'backup_assigned': backup_assigned,
-                    'available_to_book': available_to_book,
-                    'available_to_backup': available_to_backup,
-                    'booked_count': availability['booked_count'],
-                    'tba_count': availability['tba_bookings'],
-                    'backup_count': availability['backup_count'],
-                    'aag_status': aag_status,
-                    'aag_reserved': availability.get('aag_reserved', False)
-                })
+                    # Check availability using existing logic
+                    can_book, can_backup = check_dj_availability(dj_name, value_str, date_obj, is_bold, year)
+                    if can_book:
+                        available_to_book.append(dj_name)
+                    elif can_backup:
+                        available_to_backup.append(dj_name)
+            
+            # Get AAG status
+            aag_status = selected_data.get("AAG", "")
+            
+            all_dates.append({
+                'date': date_str,
+                'date_obj': date_obj,
+                'selected_data': selected_data,
+                'bold_status': bold_status,
+                'booked_djs': booked_djs,
+                'backup_assigned': backup_assigned,
+                'available_to_book': available_to_book,
+                'available_to_backup': available_to_backup,
+                'availability': availability,
+                'aag_status': aag_status,
+                'aag_reserved': availability.get('aag_reserved', False)
+            })
         
-        return fully_booked
+        return all_dates
         
     except gspread.exceptions.WorksheetNotFound:
         return None
     except Exception as e:
-        print(f"Error fetching fully booked dates: {e}")
+        print(f"Error fetching bulk availability data: {e}")
         return None
 
 

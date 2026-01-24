@@ -39,7 +39,8 @@ from dj_core import (
     is_weekend,
     get_cache_info,
     clear_gig_cache,
-    get_fully_booked_dates
+    get_fully_booked_dates,
+    get_bulk_availability_data
 )
 
 
@@ -260,7 +261,7 @@ def parse_date_range(start_str, end_str, year):
 
 
 def query_date_range(sheet_name, start_date_str, end_date_str, day_filter, service, spreadsheet, spreadsheet_id, min_spots=None):
-    """Query availability across a date range"""
+    """Query availability across a date range - optimized with bulk fetch"""
     start_date, end_date = parse_date_range(start_date_str, end_date_str, sheet_name)
     
     if not start_date or not end_date:
@@ -270,38 +271,39 @@ def query_date_range(sheet_name, start_date_str, end_date_str, day_filter, servi
         print(f"{Fore.RED}Start date must be before or equal to end date.{Style.RESET_ALL}")
         return ""
     
-    results = []
-    current_date = start_date
+    print(f"\n{Fore.YELLOW}Fetching data... (this may take a few seconds){Style.RESET_ALL}")
     
-    while current_date <= end_date:
-        month_day = current_date.strftime("%m-%d")
-        
-        day_name = calendar.day_name[current_date.weekday()]
+    # Use bulk fetch instead of per-date API calls
+    all_data = get_bulk_availability_data(sheet_name, service, spreadsheet, spreadsheet_id, start_date, end_date)
+    
+    if all_data is None:
+        return f"{Fore.RED}Error fetching data from {sheet_name} sheet.{Style.RESET_ALL}"
+    
+    results = []
+    
+    for date_info in all_data:
+        date_obj = date_info['date_obj']
+        day_name = calendar.day_name[date_obj.weekday()]
         include_date = True
         
         if day_filter:
             day_filter_lower = day_filter.lower()
             if day_filter_lower == "weekend":
-                include_date = current_date.weekday() >= 5
+                include_date = date_obj.weekday() >= 5
             elif day_filter_lower == "weekday":
-                include_date = current_date.weekday() < 5
+                include_date = date_obj.weekday() < 5
             else:
                 include_date = day_name.lower() == day_filter_lower
         
         if include_date:
-            data = get_date_availability_data(sheet_name, month_day, service, spreadsheet, spreadsheet_id)
-            # Skip if error or no data
-            if data and isinstance(data, dict) and 'date_obj' in data:
-                available_spots = data['availability']['available_spots']
-                
-                if min_spots is None or available_spots >= min_spots:
-                    results.append({
-                        'date': data['formatted_date'],
-                        'available_spots': available_spots,
-                        'available_djs': data['availability']['available_booking']
-                    })
-        
-        current_date += timedelta(days=1)
+            available_spots = date_info['availability']['available_spots']
+            
+            if min_spots is None or available_spots >= min_spots:
+                results.append({
+                    'date': date_info['date'],
+                    'available_spots': available_spots,
+                    'available_djs': date_info['availability']['available_booking']
+                })
     
     if not results:
         return f"No dates found matching criteria in range {start_date_str} to {end_date_str}."
@@ -330,7 +332,9 @@ def query_date_range(sheet_name, start_date_str, end_date_str, day_filter, servi
 
 
 def query_dj_availability(sheet_name, dj_name, start_date_str, end_date_str, service, spreadsheet, spreadsheet_id):
-    """Query when a specific DJ is available"""
+    """Query when a specific DJ is available - optimized with bulk fetch"""
+    from dj_core import get_gig_database_bookings
+    
     start_date, end_date = parse_date_range(start_date_str, end_date_str, sheet_name)
     
     if not start_date or not end_date:
@@ -340,41 +344,58 @@ def query_dj_availability(sheet_name, dj_name, start_date_str, end_date_str, ser
         print(f"{Fore.RED}Start date must be before or equal to end date.{Style.RESET_ALL}")
         return ""
     
+    print(f"\n{Fore.YELLOW}Fetching data... (this may take a few seconds){Style.RESET_ALL}")
+    
+    # Use bulk fetch instead of per-date API calls
+    all_data = get_bulk_availability_data(sheet_name, service, spreadsheet, spreadsheet_id, start_date, end_date)
+    
+    if all_data is None:
+        return f"{Fore.RED}Error fetching data from {sheet_name} sheet.{Style.RESET_ALL}"
+    
     available_dates = []
     booked_dates = []
     backup_dates = []
-    current_date = start_date
     
-    while current_date <= end_date:
-        month_day = current_date.strftime("%m-%d")
-        data = get_date_availability_data(sheet_name, month_day, service, spreadsheet, spreadsheet_id)
+    # First pass: categorize dates
+    booked_date_infos = []  # Store date info for booked dates to look up venues
+    
+    for date_info in all_data:
+        if dj_name not in date_info['selected_data']:
+            continue
         
-        # Skip if error or no data
-        if data and isinstance(data, dict) and 'date_obj' in data and dj_name in data['selected_data']:
-            value = data['selected_data'][dj_name]
-            is_bold = "(BOLD)" in value if value else False
-            clean_value = value.replace(" (BOLD)", "") if value else ""
-            value_lower = clean_value.lower()
-            
-            # Check gig database for actual bookings
-            gig_bookings = data.get('gig_bookings', {'assigned': {}, 'unassigned': []})
+        value = date_info['selected_data'][dj_name]
+        is_bold = date_info['bold_status'].get(dj_name, False)
+        clean_value = str(value).replace(" (BOLD)", "") if value else ""
+        value_lower = clean_value.lower()
+        
+        if "booked" in value_lower:
+            booked_date_infos.append(date_info)
+        elif "backup" in value_lower:
+            backup_dates.append(date_info['date'])
+        else:
+            can_book, can_backup = check_dj_availability(
+                dj_name, clean_value, date_info['date_obj'], is_bold, sheet_name
+            )
+            if can_book:
+                available_dates.append(date_info['date'])
+    
+    # Second pass: look up venue names from gig database for booked dates
+    if booked_date_infos:
+        print(f"{Fore.YELLOW}Looking up venue details for {len(booked_date_infos)} booked date(s)...{Style.RESET_ALL}")
+        
+        for date_info in booked_date_infos:
+            month_day = date_info['date_obj'].strftime("%m-%d")
+            gig_bookings = get_gig_database_bookings(sheet_name, month_day)
             assigned_bookings = gig_bookings.get('assigned', {})
             
             if dj_name in assigned_bookings:
                 venue = assigned_bookings[dj_name].get('venue', '')
-                booked_dates.append(f"{data['formatted_date']} ({venue})")
-            elif "booked" in value_lower:
-                booked_dates.append(data['formatted_date'])
-            elif "backup" in value_lower:
-                backup_dates.append(data['formatted_date'])
+                if venue:
+                    booked_dates.append(f"{date_info['date']} ({venue})")
+                else:
+                    booked_dates.append(date_info['date'])
             else:
-                can_book, can_backup = check_dj_availability(
-                    dj_name, clean_value, data['date_obj'], is_bold, sheet_name
-                )
-                if can_book:
-                    available_dates.append(data['formatted_date'])
-        
-        current_date += timedelta(days=1)
+                booked_dates.append(date_info['date'])
     
     output = ["\n" + "=" * 50]
     output.append(f"DJ AVAILABILITY QUERY - {sheet_name}")
