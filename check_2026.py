@@ -299,10 +299,19 @@ def query_date_range(sheet_name, start_date_str, end_date_str, day_filter, servi
             available_spots = date_info['availability']['available_spots']
             
             if min_spots is None or available_spots >= min_spots:
+                # Get the available DJs list, and add Stefano [MAYBE] if his cell is blank
+                available_djs = list(date_info['availability']['available_booking'])
+                
+                # Check if Stefano has a blank cell (he wouldn't be in the list)
+                stefano_value = date_info['selected_data'].get('Stefano', '')
+                stefano_clean = str(stefano_value).replace(" (BOLD)", "").strip() if stefano_value else ""
+                if not stefano_clean and 'Stefano' not in available_djs:
+                    available_djs.append('Stefano [MAYBE]')
+                
                 results.append({
                     'date': date_info['date'],
                     'available_spots': available_spots,
-                    'available_djs': date_info['availability']['available_booking']
+                    'available_djs': available_djs
                 })
     
     if not results:
@@ -373,11 +382,15 @@ def query_dj_availability(sheet_name, dj_name, start_date_str, end_date_str, ser
         elif "backup" in value_lower:
             backup_dates.append(date_info['date'])
         else:
-            can_book, can_backup = check_dj_availability(
-                dj_name, clean_value, date_info['date_obj'], is_bold, sheet_name
-            )
-            if can_book:
-                available_dates.append(date_info['date'])
+            # Special case: Stefano with blank cell = MAYBE
+            if dj_name == "Stefano" and (not clean_value or clean_value == ""):
+                available_dates.append(f"{date_info['date']} [MAYBE]")
+            else:
+                can_book, can_backup = check_dj_availability(
+                    dj_name, clean_value, date_info['date_obj'], is_bold, sheet_name
+                )
+                if can_book:
+                    available_dates.append(date_info['date'])
     
     # Second pass: look up venue names from gig database for booked dates
     if booked_date_infos:
