@@ -112,15 +112,16 @@ def get_fully_booked_dates(year, service, spreadsheet, spreadsheet_id, start_dat
         
         # Determine the range to fetch based on column letters
         max_col = max(columns.keys())
-        range_notation = f"{year}!A2:{max_col}400"  # Fetch up to row 400 to cover the whole year
+        range_no_sheet = f"A2:{max_col}400"  # Range without sheet name for worksheet.get()
+        range_with_sheet = f"{year}!A2:{max_col}400"  # Range with sheet name for service API
         
         # Fetch all values in ONE API call
-        all_values = sheet.get(range_notation)
+        all_values = sheet.get(range_no_sheet)
         
         # Fetch all formatting in ONE API call
         request = service.spreadsheets().get(
             spreadsheetId=spreadsheet_id,
-            ranges=range_notation,
+            ranges=range_with_sheet,
             includeGridData=True
         )
         response = request.execute()
