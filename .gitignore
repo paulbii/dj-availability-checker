@@ -1,0 +1,41 @@
+# === SECRETS - NEVER COMMIT THESE ===
+credentials.json
+your-credentials.json
+*credentials*.json
+.streamlit/secrets.toml
+*.key
+*.pem
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+*.egg-info/
+dist/
+build/
+
+# === IDEs ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# === OS ===
+.DS_Store
+Thumbs.db
+*.log
+
+# === Testing ===
+.pytest_cache/
+.coverage
+htmlcov/
+
+# === Personal Notes (optional) ===
+NOTES.md
+TODO.md
+scratch/
