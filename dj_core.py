@@ -220,6 +220,9 @@ def get_fully_booked_dates(year, service, spreadsheet, spreadsheet_id, start_dat
                         booked_djs.append(dj_name)
                     elif value_lower == "backup":
                         backup_assigned.append(dj_name)
+                    elif value_lower == "reserved":
+                        # Stephanie can have RESERVED status
+                        booked_djs.append(f"{dj_name} (RESERVED)")
                     else:
                         # Special case: Stefano with blank cell = MAYBE (not in system but potentially available)
                         if dj_name == "Stefano" and (not value_str or value_str.strip() == ""):

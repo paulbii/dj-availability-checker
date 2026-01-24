@@ -465,8 +465,8 @@ def show_fully_booked_dates(sheet_name, start_date_str, end_date_str, service, s
         if booking['available_to_book']:
             output.append(f"  {Fore.GREEN}Available to Book:{Style.RESET_ALL} {', '.join(booking['available_to_book'])}")
         
-        # Available to backup
-        if booking['available_to_backup']:
+        # Only show Available to Backup if no backup is already assigned
+        if not booking['backup_assigned'] and booking['available_to_backup']:
             output.append(f"  {Fore.CYAN}Available to Backup:{Style.RESET_ALL} {', '.join(booking['available_to_backup'])}")
         
         output.append("")  # Blank line between dates
