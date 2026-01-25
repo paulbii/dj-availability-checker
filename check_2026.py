@@ -479,9 +479,10 @@ def show_fully_booked_dates(sheet_name, start_date_str, end_date_str, service, s
         if booking['booked_djs']:
             output.append(f"  {Fore.RED}Booked:{Style.RESET_ALL} {', '.join(booking['booked_djs'])}")
         
-        # TBA bookings
-        if booking['tba_count'] > 0:
-            output.append(f"  {Fore.RED}TBA Bookings:{Style.RESET_ALL} {booking['tba_count']}")
+        # TBA bookings (now nested in availability)
+        tba_count = booking['availability']['tba_bookings']
+        if tba_count > 0:
+            output.append(f"  {Fore.RED}TBA Bookings:{Style.RESET_ALL} {tba_count}")
         
         # AAG status
         if booking.get('aag_status'):
