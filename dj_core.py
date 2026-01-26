@@ -450,6 +450,27 @@ def clear_gig_cache():
     get_gig_database_bookings_cached.cache_clear()
 
 
+def auto_clear_stale_cache(max_age_minutes=60):
+    """
+    Automatically clear cache if it's older than max_age_minutes.
+    Call this at the start of operations to ensure fresh data.
+    Returns True if cache was cleared, False otherwise.
+    """
+    global _cache_first_used
+    
+    if _cache_first_used is None:
+        return False
+    
+    age_seconds = (datetime.now() - _cache_first_used).total_seconds()
+    age_minutes = age_seconds / 60
+    
+    if age_minutes > max_age_minutes:
+        clear_gig_cache()
+        return True
+    
+    return False
+
+
 def check_dj_availability(dj_name, value, date_obj=None, is_bold=False, year=None):
     """
     Check if a DJ is available based on their current status
@@ -650,6 +671,9 @@ def get_date_availability_data(sheet_name, month_day, service, spreadsheet, spre
         - {'error': 'invalid_format'} if date format is invalid
         - {'error': 'not_found', 'formatted_date': 'Mon 1/1'} if valid format but no data
     """
+    # Auto-clear stale gig database cache (older than 60 minutes)
+    auto_clear_stale_cache(60)
+    
     try:
         # Get appropriate columns for the year
         columns_to_return = get_columns_for_year(sheet_name)

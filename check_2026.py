@@ -40,7 +40,8 @@ from dj_core import (
     get_cache_info,
     clear_gig_cache,
     get_fully_booked_dates,
-    get_bulk_availability_data
+    get_bulk_availability_data,
+    auto_clear_stale_cache
 )
 
 
@@ -343,6 +344,9 @@ def query_date_range(sheet_name, start_date_str, end_date_str, day_filter, servi
 def query_dj_availability(sheet_name, dj_name, start_date_str, end_date_str, service, spreadsheet, spreadsheet_id):
     """Query when a specific DJ is available - optimized with bulk fetch"""
     from dj_core import get_gig_database_bookings
+    
+    # Auto-clear stale gig database cache (older than 60 minutes)
+    auto_clear_stale_cache(60)
     
     start_date, end_date = parse_date_range(start_date_str, end_date_str, sheet_name)
     
