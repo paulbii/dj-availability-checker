@@ -32,6 +32,7 @@ INQUIRIES_SHEET_NAME = 'Form Responses 1'
 
 # Gig Database API
 GIG_DATABASE_URL = 'https://database.bigfundj.com/bigfunadmin/availabilityjson.php'
+GIG_DATABASE_MD_URL = 'https://database.bigfundj.com/bigfunadmin/availabilityMDjson.php'
 
 # Year-specific column definitions
 COLUMNS_2025 = {
@@ -382,6 +383,92 @@ def get_gig_database_bookings(year, month_day):
     except Exception:
         # If anything fails, return empty dict (fall back to matrix-only)
         return {'assigned': {}, 'unassigned': []}
+
+
+def get_gig_database_bookings_multiday(year, month_day):
+    """
+    Query the gig database API for bookings ±3 days from the given date.
+    Uses Henry's optimized MD endpoint (single call instead of 6).
+    
+    Args:
+        year: Year string (e.g., "2026")
+        month_day: Date in MM-DD format (e.g., "03-21")
+    
+    Returns:
+        dict mapping date strings (MM-DD) to booking info:
+        {
+            "03-18": {'assigned': {...}, 'unassigned': [...]},
+            "03-19": {'assigned': {...}, 'unassigned': [...]},
+            ...
+        }
+        Returns empty dict if API fails.
+    """
+    try:
+        # Construct date in m/d/yyyy format for the API
+        month, day = month_day.split('-')
+        date_str = f"{int(month)}/{int(day)}/{year}"
+        
+        url = f"{GIG_DATABASE_MD_URL}?date={date_str}"
+        response = requests.get(url, timeout=10)
+        
+        if response.status_code != 200:
+            return {}
+        
+        bookings = response.json()
+        
+        if not bookings:  # Empty array
+            return {}
+        
+        # Organize bookings by date
+        bookings_by_date = {}
+        
+        for booking in bookings:
+            # Get the event date from the booking (format: "2026-02-21")
+            event_date = booking.get('event_date', '')
+            if not event_date:
+                continue
+            
+            # Convert event_date (YYYY-MM-DD) to MM-DD format
+            try:
+                parts = event_date.split('-')
+                if len(parts) == 3:
+                    m, d = int(parts[1]), int(parts[2])
+                    date_key = f"{m:02d}-{d:02d}"
+                else:
+                    continue
+            except (ValueError, IndexError):
+                continue
+            
+            # Initialize date entry if needed
+            if date_key not in bookings_by_date:
+                bookings_by_date[date_key] = {'assigned': {}, 'unassigned': []}
+            
+            full_name = booking.get('assigned_dj', '')
+            venue = booking.get('venue_name', '')
+            client = booking.get('client_name', '')
+            
+            # Check for unassigned bookings
+            if full_name.lower() == 'unassigned':
+                bookings_by_date[date_key]['unassigned'].append({
+                    'venue': venue,
+                    'client': client
+                })
+            else:
+                # Extract first name and map to short name
+                first_name = full_name.split()[0].lower() if full_name else ''
+                short_name = DJ_NAME_MAP.get(first_name)
+                
+                if short_name:
+                    bookings_by_date[date_key]['assigned'][short_name] = {
+                        'venue': venue,
+                        'client': client
+                    }
+        
+        return bookings_by_date
+        
+    except Exception:
+        # If anything fails, return empty dict
+        return {}
 
 
 @lru_cache(maxsize=100)
@@ -865,24 +952,31 @@ def get_venue_inquiries_for_date(event_date_str, client):
 def get_nearby_bookings_for_dj(dj_name, date_obj, year, service, spreadsheet, spreadsheet_id):
     """
     Get nearby bookings for a DJ (3 days before and after the target date)
-    Uses parallel requests and caching for improved performance.
+    Uses Henry's optimized MD endpoint (single API call instead of 6).
     
     Args:
         dj_name: Name of the DJ
         date_obj: The target date object
         year: The year being checked (stays within this year only)
-        service: Google Sheets API service
-        spreadsheet: The spreadsheet object
-        spreadsheet_id: The spreadsheet ID
+        service: Google Sheets API service (not used, kept for compatibility)
+        spreadsheet: The spreadsheet object (not used, kept for compatibility)
+        spreadsheet_id: The spreadsheet ID (not used, kept for compatibility)
     
     Returns:
         List of formatted date strings where DJ is booked nearby (e.g., ["Thu 1/15", "Sun 1/18"])
     """
     nearby_bookings = []
-    cache_time = get_cache_time()  # Get current hour for cache key
     
-    # Prepare all dates to check
-    dates_to_check = []
+    # Get the target date in MM-DD format
+    month_day = date_obj.strftime("%m-%d")
+    
+    # Fetch all bookings ±3 days in a single API call
+    bookings_by_date = get_gig_database_bookings_multiday(year, month_day)
+    
+    if not bookings_by_date:
+        return []
+    
+    # Check each day in the ±3 range (excluding target date)
     for offset in [-3, -2, -1, 1, 2, 3]:
         check_date = date_obj + timedelta(days=offset)
         
@@ -890,34 +984,13 @@ def get_nearby_bookings_for_dj(dj_name, date_obj, year, service, spreadsheet, sp
         if check_date.year != int(year):
             continue
         
-        dates_to_check.append((offset, check_date))
-    
-    # Function to check one date
-    def check_date_for_dj(date_info):
-        offset, check_date = date_info
-        month_day = check_date.strftime("%m-%d")
+        check_month_day = check_date.strftime("%m-%d")
         
-        # Use cached version
-        gig_bookings = get_gig_database_bookings_cached(year, month_day, cache_time)
-        
-        if dj_name in gig_bookings.get('assigned', {}):
+        # Check if DJ is booked on this date
+        date_bookings = bookings_by_date.get(check_month_day, {})
+        if dj_name in date_bookings.get('assigned', {}):
             # Format as "Day M/D"
             formatted = f"{calendar.day_name[check_date.weekday()][:3]} {check_date.month}/{check_date.day}"
-            return (offset, formatted)  # Return offset for sorting
-        return None
-    
-    # Execute requests in parallel (max 6 threads, one per date)
-    with ThreadPoolExecutor(max_workers=6) as executor:
-        futures = {executor.submit(check_date_for_dj, d): d for d in dates_to_check}
-        
-        results = []
-        for future in as_completed(futures):
-            result = future.result()
-            if result:
-                results.append(result)
-        
-        # Sort by offset to maintain chronological order
-        results.sort(key=lambda x: x[0])
-        nearby_bookings = [formatted for offset, formatted in results]
+            nearby_bookings.append(formatted)
     
     return nearby_bookings
