@@ -597,8 +597,8 @@ def check_dj_availability(dj_name, value, date_obj=None, is_bold=False, year=Non
     if value_lower == "booked" or value_lower == "backup":
         return False, False
     
-    # Handle RESERVED status (AAG events)
-    if value_lower == "reserved":
+    # Handle RESERVED and STANFORD status (treated as booked)
+    if value_lower == "reserved" or value_lower == "stanford":
         return False, False  # Treated as booked
     
     # Special handling for Felipe in 2026 and 2027
@@ -700,7 +700,7 @@ def analyze_availability(selected_data, date_obj, year=None):
             
             continue
             
-        if value_lower == "booked" or "aag" in value_lower:
+        if value_lower == "booked" or "aag" in value_lower or value_lower == "stanford":
             booked_count += 1
     
     # Second pass: analyze availability
@@ -716,7 +716,7 @@ def analyze_availability(selected_data, date_obj, year=None):
         if value_lower == "backup":
             backup_count += 1
         # Only check availability for non-booked and non-backup DJs
-        elif value_lower != "booked":
+        elif value_lower != "booked" and value_lower != "stanford":
             can_book, can_backup = check_dj_availability(name, value, date_obj, is_bold, year)
             if can_book:
                 available_for_booking.append(name)

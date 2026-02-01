@@ -60,6 +60,9 @@ def format_dj_status(dj_name, value, date_obj, is_bookable, is_backup, year=None
     if value and "booked" in value_lower:
         return f"{Fore.RED}{dj_name}: {value}{Style.RESET_ALL}"
     
+    if value and value_lower == "stanford":
+        return f"{Fore.RED}{dj_name}: STANFORD{Style.RESET_ALL}"
+    
     if value and "backup" in value_lower:
         return f"{Fore.BLUE}{dj_name}: {value}{Style.RESET_ALL}"
     
@@ -381,7 +384,7 @@ def query_dj_availability(sheet_name, dj_name, start_date_str, end_date_str, ser
         clean_value = str(value).replace(" (BOLD)", "") if value else ""
         value_lower = clean_value.lower()
         
-        if "booked" in value_lower:
+        if "booked" in value_lower or value_lower == "stanford":
             booked_date_infos.append(date_info)
         elif "backup" in value_lower:
             backup_dates.append(date_info['date'])
