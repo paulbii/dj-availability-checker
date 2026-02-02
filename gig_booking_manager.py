@@ -1117,7 +1117,9 @@ def main():
 
     try:
         success = manager.run(args.json_path)
-        sys.exit(0 if success else 1)
+        # Exit 0 even if success is False (handled conflicts already showed dialog)
+        # Reserve non-zero exit for unexpected errors only
+        sys.exit(0)
     except Exception as e:
         print(f"\n  ERROR: {e}")
         if not args.dry_run:
