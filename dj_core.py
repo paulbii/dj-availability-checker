@@ -932,7 +932,7 @@ def analyze_availability(selected_data, date_obj, year=None):
     
     # Second pass: analyze availability
     for name, value in selected_data.items():
-        if name in ["Date", "TBA", "AAG", "Stephanie"]:  # Skip Date, TBA, AAG (not DJs), and Stephanie
+        if name in ["Date", "TBA", "AAG"]:  # Skip non-DJ columns
             continue
             
         is_bold = "(BOLD)" in value if value else False
@@ -1031,12 +1031,13 @@ def get_date_availability_data(sheet_name, month_day, service, spreadsheet, spre
                     cell_value = row_contents[index]
                     is_bold = False
                     
-                    if 'effectiveFormat' in row_data[index]:
-                        is_bold = row_data[index]['effectiveFormat']['textFormat'].get('bold', False)
-                    
-                    if 'textFormatRuns' in row_data[index]:
-                        is_bold = any(run.get('format', {}).get('bold', False) 
-                                    for run in row_data[index]['textFormatRuns'])
+                    if index < len(row_data):
+                        if 'effectiveFormat' in row_data[index]:
+                            is_bold = row_data[index]['effectiveFormat']['textFormat'].get('bold', False)
+                        
+                        if 'textFormatRuns' in row_data[index]:
+                            is_bold = any(run.get('format', {}).get('bold', False) 
+                                        for run in row_data[index]['textFormatRuns'])
 
                     if is_bold and label != "Date":
                         selected_data[label] = f"{cell_value} (BOLD)"
