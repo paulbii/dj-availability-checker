@@ -546,40 +546,31 @@ class MockSheetsClient:
 def check_calendar_conflicts(date_obj, initials_bracket):
     """
     Check if any events on the given date contain the DJ initials in the title.
+    Uses icalBuddy for fast calendar queries (AppleScript is too slow with large calendars).
     Returns list of conflicting event titles, or empty list if clear.
     """
-    date_str = date_obj.strftime("%B %d, %Y")  # "February 21, 2026"
-    next_date = date_obj + timedelta(days=1)
-    next_date_str = next_date.strftime("%B %d, %Y")
+    date_str = date_obj.strftime("%Y-%m-%d")  # "2026-02-21"
 
-    # Escape for AppleScript
-    initials_escaped = initials_bracket.replace('"', '\\"')
-
-    script = f'''
-    tell application "Calendar"
-        tell calendar "{CALENDAR_NAME}"
-            set targetStart to date "{date_str} 12:00:00 AM"
-            set targetEnd to date "{next_date_str} 12:00:00 AM"
-            set dayEvents to (every event whose start date >= targetStart and start date < targetEnd)
-            set conflicts to ""
-            repeat with e in dayEvents
-                if summary of e contains "{initials_escaped}" then
-                    set conflicts to conflicts & summary of e & linefeed
-                end if
-            end repeat
-            return conflicts
-        end tell
-    end tell
-    '''
-    result = subprocess.run(
-        ["osascript", "-e", script],
-        capture_output=True, text=True, timeout=15,
-    )
-
-    output = result.stdout.strip()
-    if output:
-        return [line.strip() for line in output.split("\n") if line.strip()]
-    return []
+    try:
+        result = subprocess.run(
+            ["icalBuddy", "-ic", CALENDAR_NAME,
+             "-eep", "notes,url,location,attendees",
+             "-b", "", "-nc",
+             f"eventsFrom:{date_str} to:{date_str}"],
+            capture_output=True, text=True, timeout=10,
+        )
+        conflicts = []
+        for line in result.stdout.strip().split("\n"):
+            line = line.strip()
+            if line and initials_bracket in line:
+                conflicts.append(line)
+        return conflicts
+    except FileNotFoundError:
+        print("  WARNING: icalBuddy not installed (brew install ical-buddy)")
+        return []
+    except subprocess.TimeoutExpired:
+        print("  WARNING: Calendar conflict check timed out")
+        return []
 
 
 def create_timed_calendar_event(booking, cal_start, cal_end, test_mode=False):
@@ -634,7 +625,7 @@ def create_timed_calendar_event(booking, cal_start, cal_end, test_mode=False):
 
     result = subprocess.run(
         ["osascript", "-e", script],
-        capture_output=True, text=True, timeout=15,
+        capture_output=True, text=True, timeout=45,
     )
     if result.returncode != 0:
         raise RuntimeError(f"Calendar event creation failed: {result.stderr}")
@@ -672,7 +663,7 @@ def create_allday_backup_event(date_obj, dj_name, test_mode=False):
 
     result = subprocess.run(
         ["osascript", "-e", script],
-        capture_output=True, text=True, timeout=15,
+        capture_output=True, text=True, timeout=45,
     )
     if result.returncode != 0:
         raise RuntimeError(f"Backup event creation failed: {result.stderr}")

@@ -26,6 +26,35 @@ CALENDAR_NAME = "Gigs"
 TEST_EMAIL = "paul@bigfundj.com"
 
 
+def check_calendar_conflicts(date_str, initials_bracket):
+    """
+    Check if any events on the given date contain the DJ initials in the title.
+    Uses icalBuddy for fast calendar queries.
+    Returns list of conflicting event titles, or empty list if clear.
+    date_str: "YYYY-MM-DD" format
+    """
+    try:
+        result = subprocess.run(
+            ["icalBuddy", "-ic", CALENDAR_NAME,
+             "-eep", "notes,url,location,attendees",
+             "-b", "", "-nc",
+             f"eventsFrom:{date_str} to:{date_str}"],
+            capture_output=True, text=True, timeout=10,
+        )
+        conflicts = []
+        for line in result.stdout.strip().split("\n"):
+            line = line.strip()
+            if line and initials_bracket in line:
+                conflicts.append(line)
+        return conflicts
+    except FileNotFoundError:
+        print("  WARNING: icalBuddy not installed (brew install ical-buddy)")
+        return []
+    except subprocess.TimeoutExpired:
+        print("  WARNING: Calendar conflict check timed out")
+        return []
+
+
 def build_event_title(client, has_planner, dj_name, dj2_name=""):
     """Build event title with DJ initials and optional planner indicator."""
     names = extract_client_first_names(client)
@@ -241,6 +270,20 @@ def process_booking(booking_data, test_mode=False):
     if test_mode and dj not in ("Unknown", "Unassigned"):
         print(f"  [TEST MODE - invite redirected to {TEST_EMAIL}]")
     
+    # Check for calendar conflicts before creating event
+    if dj in ("Unknown", "Unassigned"):
+        initials_bracket = f"[{get_unassigned_initials(assigned_dj2)}]" if dj == "Unassigned" and assigned_dj2 else "[UP]"
+    else:
+        initials_bracket = f"[{DJ_INITIALS.get(dj, 'UP')}]"
+
+    conflicts = check_calendar_conflicts(event_date, initials_bracket)
+    if conflicts:
+        print(f"\n⚠️  CONFLICT DETECTED — existing event(s) with {initials_bracket} on this date:")
+        for c in conflicts:
+            print(f"     • {c}")
+        print(f"\n  Skipping event creation to avoid duplicate.")
+        return False
+
     # Create the event
     success, error = create_calendar_event(title, start_date, end_date, location, dj_email)
     
