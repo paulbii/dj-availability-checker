@@ -80,6 +80,213 @@ DJ_NAME_MAP = {
     "stephanie": "Stephanie"
 }
 
+# DJ initials for calendar title bracket notation (e.g., [HK] for Henry)
+DJ_INITIALS = {
+    "Henry": "HK",
+    "Woody": "WM",
+    "Paul": "PB",
+    "Stefano": "SB",
+    "Felipe": "FS",
+    "Stephanie": "SD",
+    "Unknown": "UP",
+}
+
+# DJ email addresses (all follow firstname@bigfundj.com pattern)
+DJ_EMAILS = {
+    "Henry": "henry@bigfundj.com",
+    "Woody": "woody@bigfundj.com",
+    "Paul": "paul@bigfundj.com",
+    "Stefano": "stefano@bigfundj.com",
+    "Felipe": "felipe@bigfundj.com",
+    "Stephanie": "stephanie@bigfundj.com",
+}
+
+# Backup payment categories
+PAID_BACKUP_DJS = {"Stefano", "Felipe", "Stephanie"}
+UNPAID_BACKUP_DJS = {"Henry", "Woody", "Paul"}
+
+# Column mappings per year (1-indexed for gspread compatibility)
+# Derived from the letter-based COLUMNS_20XX maps above
+def _letter_to_index(letter):
+    return ord(letter) - ord('A') + 1
+
+COLUMN_MAPS = {
+    2025: {label: _letter_to_index(col) for col, label in COLUMNS_2025.items()},
+    2026: {label: _letter_to_index(col) for col, label in COLUMNS_2026.items()},
+    2027: {label: _letter_to_index(col) for col, label in COLUMNS_2027.items()},
+}
+
+# DJs eligible for backup consideration per year
+BACKUP_ELIGIBLE_DJS = {
+    2025: ["Henry", "Woody", "Paul", "Stefano", "Felipe", "Stephanie"],
+    2026: ["Henry", "Woody", "Paul", "Stefano", "Felipe"],
+    2027: ["Henry", "Woody", "Paul", "Stefano", "Stephanie", "Felipe"],
+}
+
+
+# =============================================================================
+# SHARED UTILITY FUNCTIONS
+# Used by dj_core, gig_booking_manager, and gig_to_calendar
+# =============================================================================
+
+def get_dj_short_name(full_name):
+    """Map FileMaker full name to short name. Returns 'Unassigned' or 'Unknown' for special cases."""
+    if not full_name or full_name.strip() == "":
+        return "Unknown"
+    if full_name.strip().lower() == "unassigned":
+        return "Unassigned"
+    first_name = full_name.strip().split()[0].lower()
+    return DJ_NAME_MAP.get(first_name, "Unknown")
+
+
+def get_dj_initials(short_name):
+    """Get DJ initials for calendar title bracket notation."""
+    return DJ_INITIALS.get(short_name, "UP")
+
+
+def get_unassigned_initials(dj2_full_name):
+    """For unassigned bookings, initials are U + DJ2's first initial."""
+    if not dj2_full_name or dj2_full_name.strip() == "":
+        return "UP"
+    first_name = dj2_full_name.strip().split()[0]
+    return f"U{first_name[0].upper()}"
+
+
+def date_to_sheet_format(date_obj):
+    """Convert a date to the availability matrix format: 'Sat 2/21'."""
+    day_abbr = date_obj.strftime("%a")
+    month_day = f"{date_obj.month}/{date_obj.day}"
+    return f"{day_abbr} {month_day}"
+
+
+def extract_client_first_names(client_name):
+    """
+    Extract first names for calendar title.
+    Couples: "Anya Hee and Hilal Ahmad" → "Anya and Hilal"
+    Non-couples: "Bird Family Seder" → "Bird Family Seder"
+    """
+    if " and " not in client_name:
+        return client_name
+    parts = client_name.split(" and ", 1)
+    left_words = parts[0].strip().split()
+    right_words = parts[1].strip().split()
+    if len(left_words) >= 2 and len(right_words) >= 2:
+        return f"{left_words[0]} and {right_words[0]}"
+    return client_name
+
+
+def parse_tba_value(tba_str):
+    """
+    Parse TBA column value and return the number of TBA bookings.
+    '' → 0, 'BOOKED' → 1, 'BOOKED x 2' → 2, 'AAG' → 1,
+    'BOOKED, AAG' → 2, 'BOOKED x 2, AAG' → 3
+    """
+    if not tba_str or tba_str.strip() == "":
+        return 0
+    count = 0
+    parts = [p.strip() for p in tba_str.split(",")]
+    for part in parts:
+        if part.upper() == "AAG":
+            count += 1
+        elif part.upper() == "BOOKED":
+            count += 1
+        elif part.upper().startswith("BOOKED X "):
+            try:
+                count += int(part.upper().replace("BOOKED X ", ""))
+            except ValueError:
+                count += 1
+    return count
+
+
+def is_paid_backup(dj_name):
+    """Returns True if the DJ gets paid for backup duty."""
+    return dj_name in PAID_BACKUP_DJS
+
+
+def calculate_arrival_offset(sound_type, has_ceremony):
+    """
+    Calculate DJ arrival offset in minutes.
+    Priority: Quad → No Main Sound → Standard w/ ceremony → Standard w/o ceremony.
+    """
+    sound_lower = (sound_type or "").lower()
+    if "quad" in sound_lower:
+        return 120
+    if "no main sound" in sound_lower:
+        return 90 if has_ceremony else 60
+    return 120 if has_ceremony else 90
+
+
+def convert_times_to_24h(start_str, end_str):
+    """
+    Convert 12-hour times (no AM/PM) to 24-hour (hour, minute) tuples.
+    Rules:
+      - Start > End numerically: crosses noon → start AM, end PM
+      - End = 12 and Start < 12: crosses noon at 12
+      - Start ≤ End: both PM
+      - End = 12:00: midnight → cap at 23:59
+    """
+    def parse_hm(t):
+        parts = t.strip().split(":")
+        h = int(parts[0])
+        m = int(parts[1]) if len(parts) > 1 else 0
+        return h, m
+
+    start_h, start_m = parse_hm(start_str)
+    end_h, end_m = parse_hm(end_str)
+
+    start_val = start_h * 60 + start_m
+    end_val = end_h * 60 + end_m
+
+    if end_h == 12 and end_m == 0:
+        start_24h = start_h + 12 if start_h != 12 else 12
+        end_24h = 23
+        end_m = 59
+    elif start_val > end_val:
+        start_24h = start_h
+        end_24h = end_h + 12 if end_h != 12 else 12
+    elif end_h == 12 and start_h < 12:
+        start_24h = start_h
+        end_24h = 12
+    else:
+        start_24h = start_h + 12 if start_h != 12 else 12
+        end_24h = end_h + 12 if end_h != 12 else 12
+
+    if end_24h >= 24:
+        end_24h = 23
+        end_m = 59
+
+    return (start_24h, start_m), (end_24h, end_m)
+
+
+def calculate_event_times(booking):
+    """
+    Calculate calendar event start and end times.
+    Start = event start - arrival offset
+    End = event end + 60 minutes (teardown), capped at 23:59
+    """
+    if not booking["start_time"] or not booking["end_time"]:
+        return None, None
+
+    (start_h, start_m), (end_h, end_m) = convert_times_to_24h(
+        booking["start_time"], booking["end_time"]
+    )
+
+    arrival_offset = calculate_arrival_offset(
+        booking["sound_type"], booking["has_ceremony"]
+    )
+
+    start_dt = booking["date"].replace(hour=start_h, minute=start_m)
+    cal_start = start_dt - timedelta(minutes=arrival_offset)
+
+    end_dt = booking["date"].replace(hour=end_h, minute=end_m)
+    cal_end = end_dt + timedelta(minutes=60)
+
+    midnight = booking["date"].replace(hour=23, minute=59)
+    if cal_end > midnight:
+        cal_end = midnight
+
+    return cal_start, cal_end
+
 
 def get_columns_for_year(year):
     """Get the appropriate column mapping for the given year"""
