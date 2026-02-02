@@ -61,6 +61,10 @@ def format_dj_status_for_display(dj_name, value, date_obj, year, gig_booking=Non
     if value and "reserved" in value_lower:
         return f":red[{value}]"
     
+    # Check for STANFORD status
+    if value and value_lower == "stanford":
+        return f":red[STANFORD]"
+    
     # Check for booked status
     if value and "booked" in value_lower:
         return f":red[{value}]"
