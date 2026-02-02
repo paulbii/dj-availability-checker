@@ -329,7 +329,7 @@ def get_backup_title(dj_name):
     return f"[{initials}] BACKUP DJ"
 
 
-def calculate_spots_remaining(row_data, year):
+def calculate_spots_remaining(row_data, year, date_obj=None):
     """
     Calculate available booking spots for a date.
     Available Spots = (DJs available for booking) - (TBA bookings) - (AAG holds)
@@ -357,12 +357,10 @@ def calculate_spots_remaining(row_data, year):
         if felipe_val == "":
             available_djs += 1
 
-    # Stephanie (2027+): blank on weekend = available
+    # Stephanie (2027+): blank on weekend = available, weekday = not available
     if year >= 2027 and "Stephanie" in row_data:
         steph_val = (row_data.get("Stephanie", "") or "").strip().upper()
-        # Would need the date to check weekend, but row_data might not have it
-        # For now, count if blank (caller should verify weekend)
-        if steph_val == "":
+        if steph_val == "" and date_obj and date_obj.weekday() >= 5:
             available_djs += 1
 
     # Subtract TBA bookings
@@ -936,7 +934,7 @@ class GigBookingManager:
 
         if not booking["is_unassigned"]:
             print("— Phase 2: Backup assessment...")
-            spots = calculate_spots_remaining(row_data, year)
+            spots = calculate_spots_remaining(row_data, year, booking["date"])
             existing_backup = check_existing_backup(row_data)
 
             if existing_backup:
