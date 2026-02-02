@@ -425,7 +425,7 @@ def query_dj_availability(sheet_name, dj_name, start_date_str, end_date_str, ser
         clean_value = str(value).replace(" (BOLD)", "") if value else ""
         value_lower = clean_value.lower()
         
-        if "booked" in value_lower or value_lower == "stanford":
+        if "booked" in value_lower or value_lower == "stanford" or value_lower == "reserved":
             booked_date_infos.append(date_info)
         elif "backup" in value_lower:
             backup_dates.append(date_info['date'])
