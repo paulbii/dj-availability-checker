@@ -65,7 +65,7 @@ on run argv
 	
 	-- Run the Python script
 	try
-		set shellCmd to "cd " & quoted form of scriptDir & " && python3 " & quoted form of pythonScript & " " & quoted form of jsonPath & extraFlags & " 2>&1"
+		set shellCmd to "cd " & quoted form of scriptDir & " && /Users/paulburchfield/miniconda3/bin/python3 " & quoted form of pythonScript & " " & quoted form of jsonPath & extraFlags & " 2>&1"
 		set scriptOutput to do shell script shellCmd
 		
 		-- Log output (visible in Console.app)

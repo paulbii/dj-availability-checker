@@ -190,7 +190,7 @@ on run argv
     end if
     
     -- Build and run command
-    set cmd to "python3 " & quoted form of pythonScript & " " & quoted form of tempFile
+    set cmd to "/Users/paulburchfield/miniconda3/bin/python3 " & quoted form of pythonScript & " " & quoted form of tempFile
     if testMode then
         set cmd to cmd & " --test"
     end if
