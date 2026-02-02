@@ -553,10 +553,10 @@ def check_calendar_conflicts(date_obj, initials_bracket):
 
     try:
         result = subprocess.run(
-            ["icalBuddy", "-ic", CALENDAR_NAME,
+            ["/opt/homebrew/bin/icalBuddy", "-ic", "Gigs,Unavailable",
              "-eep", "notes,url,location,attendees",
              "-b", "", "-nc",
-             f"eventsFrom:{date_str} to:{date_str}"],
+             f"eventsFrom:{date_str}", f"to:{date_str}"],
             capture_output=True, text=True, timeout=10,
         )
         conflicts = []
@@ -655,7 +655,7 @@ def create_allday_backup_event(date_obj, dj_name, test_mode=False):
     script = f'''
     tell application "Calendar"
         tell calendar "{CALENDAR_NAME}"
-            set newEvent to make new event with properties {{summary:"{title_esc}", start date:date "{date_str} 12:00:00 AM", allday event:true}}
+            set newEvent to make new event with properties {{summary:"{title_esc}", start date:date "{date_str} 12:00:00 AM", end date:date "{date_str} 11:59:00 PM", allday event:true}}
             {invitee_block}
         end tell
     end tell

@@ -35,10 +35,10 @@ def check_calendar_conflicts(date_str, initials_bracket):
     """
     try:
         result = subprocess.run(
-            ["icalBuddy", "-ic", CALENDAR_NAME,
+            ["/opt/homebrew/bin/icalBuddy", "-ic", "Gigs,Unavailable",
              "-eep", "notes,url,location,attendees",
              "-b", "", "-nc",
-             f"eventsFrom:{date_str} to:{date_str}"],
+             f"eventsFrom:{date_str}", f"to:{date_str}"],
             capture_output=True, text=True, timeout=10,
         )
         conflicts = []
