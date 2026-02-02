@@ -41,6 +41,7 @@ from dj_core import (
     UNPAID_BACKUP_DJS,
     COLUMN_MAPS,
     BACKUP_ELIGIBLE_DJS,
+    KNOWN_CELL_VALUES,
     SCOPE as SCOPES,
     # Utility functions
     get_dj_short_name,
@@ -256,6 +257,11 @@ def can_backup(dj_name, cell_value, is_bold, date_obj, year):
     """
     value = (cell_value or "").strip().upper()
     weekend = is_weekend(date_obj)
+
+    # Guard: reject unknown cell values
+    if value and value.lower() not in KNOWN_CELL_VALUES:
+        print(f'  ⚠️  Unknown matrix value for {dj_name}: "{value}" (in can_backup) — treating as unavailable')
+        return False, None
 
     # Universal: already booked, already backup, or maxed → no
     if value in ("BOOKED", "BACKUP", "MAXED", "RESERVED"):

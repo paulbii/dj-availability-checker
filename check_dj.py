@@ -42,17 +42,28 @@ from dj_core import (
     clear_gig_cache,
     get_fully_booked_dates,
     get_bulk_availability_data,
-    auto_clear_stale_cache
+    auto_clear_stale_cache,
+    KNOWN_CELL_VALUES,
 )
 
 
 def format_dj_status(dj_name, value, date_obj, is_bookable, is_backup, year=None, nearby_bookings=None, gig_booking=None):
     """Format a DJ's status line with appropriate colors and indicators"""
     
+    clean_value = value.replace(" (BOLD)", "").strip() if value else ""
+    clean_lower = clean_value.lower()
+    
     # If we have gig database info for this DJ, they're booked - show venue
     if gig_booking:
         venue = gig_booking.get('venue', '')
-        return f"{Fore.RED}{dj_name}: BOOKED ({venue}){Style.RESET_ALL}"
+        line = f"{Fore.RED}{dj_name}: BOOKED ({venue}){Style.RESET_ALL}"
+        # Warn if matrix cell doesn't match the gig database
+        if clean_lower != "booked":
+            if clean_value:
+                line += f"  {Fore.YELLOW}⚠️  matrix shows \"{clean_value}\"{Style.RESET_ALL}"
+            else:
+                line += f"  {Fore.YELLOW}⚠️  matrix is blank{Style.RESET_ALL}"
+        return line
     
     if dj_name == "Stefano" and (not value or value.strip() == ""):
         return f"{Fore.YELLOW}{dj_name}: [MAYBE]{Style.RESET_ALL}"
@@ -72,6 +83,10 @@ def format_dj_status(dj_name, value, date_obj, is_bookable, is_backup, year=None
     
     if value and value_lower == "last":
         return f"{Fore.GREEN}{dj_name}: {value} - available (low priority){Style.RESET_ALL}"
+    
+    # Check for unknown cell values
+    if clean_value and clean_lower not in KNOWN_CELL_VALUES:
+        return f"{Fore.YELLOW}{dj_name}: {clean_value} ⚠️  unknown status — treating as unavailable{Style.RESET_ALL}"
     
     # Format nearby bookings if available
     nearby_text = ""
@@ -151,11 +166,19 @@ def check_availability(sheet_name, month_day_to_check, service, spreadsheet, spr
                     response.append(f"{label}: ")
             elif label == "Stephanie":
                 value_lower = str(value).lower()
+                clean_value = value.replace(" (BOLD)", "").strip() if value else ""
+                clean_lower = clean_value.lower()
                 # Check if Stephanie has a gig database booking
                 steph_booking = assigned_bookings.get("Stephanie")
                 if steph_booking:
                     venue = steph_booking.get('venue', '')
-                    response.append(f"{Fore.RED}{label}: BOOKED ({venue}){Style.RESET_ALL}")
+                    line = f"{Fore.RED}{label}: BOOKED ({venue}){Style.RESET_ALL}"
+                    if clean_lower != "booked":
+                        if clean_value:
+                            line += f"  {Fore.YELLOW}⚠️  matrix shows \"{clean_value}\"{Style.RESET_ALL}"
+                        else:
+                            line += f"  {Fore.YELLOW}⚠️  matrix is blank{Style.RESET_ALL}"
+                    response.append(line)
                 elif "booked" in value_lower or "aag" in value_lower:
                     response.append(f"{Fore.RED}{label}: {value}{Style.RESET_ALL}")
                 elif "reserved" in value_lower:
@@ -165,8 +188,8 @@ def check_availability(sheet_name, month_day_to_check, service, spreadsheet, spr
                 elif year_int >= 2027:
                     # 2027+: Stephanie is a regular weekend DJ, full availability check
                     is_bold = "(BOLD)" in value if value else False
-                    clean_value = value.replace(" (BOLD)", "") if value else ""
-                    can_book, can_backup = check_dj_availability(label, clean_value, date_obj, is_bold, sheet_name)
+                    clean_val = value.replace(" (BOLD)", "") if value else ""
+                    can_book, can_backup = check_dj_availability(label, clean_val, date_obj, is_bold, sheet_name, warn=False)
                     
                     nearby_bookings = []
                     if can_book and not steph_booking:
@@ -177,6 +200,8 @@ def check_availability(sheet_name, month_day_to_check, service, spreadsheet, spr
                 elif not value or value.strip() == "":
                     # Pre-2027: blank Stephanie = not available
                     response.append(f"{label}: not available ({sheet_name})")
+                elif clean_value and clean_lower not in KNOWN_CELL_VALUES:
+                    response.append(f"{Fore.YELLOW}{label}: {clean_value} ⚠️  unknown status — treating as unavailable{Style.RESET_ALL}")
                 else:
                     response.append(f"{label}: {value}")
             else:
@@ -185,7 +210,7 @@ def check_availability(sheet_name, month_day_to_check, service, spreadsheet, spr
                 
                 is_bold = "(BOLD)" in value if value else False
                 clean_value = value.replace(" (BOLD)", "") if value else ""
-                can_book, can_backup = check_dj_availability(label, clean_value, date_obj, is_bold, sheet_name)
+                can_book, can_backup = check_dj_availability(label, clean_value, date_obj, is_bold, sheet_name, warn=False)
                 
                 # Get nearby bookings if DJ is available
                 nearby_bookings = []
@@ -410,7 +435,7 @@ def query_dj_availability(sheet_name, dj_name, start_date_str, end_date_str, ser
                 available_dates.append(f"{date_info['date']} [MAYBE]")
             else:
                 can_book, can_backup = check_dj_availability(
-                    dj_name, clean_value, date_info['date_obj'], is_bold, sheet_name
+                    dj_name, clean_value, date_info['date_obj'], is_bold, sheet_name, warn=False
                 )
                 if can_book:
                     available_dates.append(date_info['date'])

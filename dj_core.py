@@ -123,6 +123,19 @@ BACKUP_ELIGIBLE_DJS = {
     2027: ["Henry", "Woody", "Paul", "Stefano", "Stephanie", "Felipe"],
 }
 
+# All recognized cell values in the availability matrix (lowercase).
+# If a cell contains a value not in this set, the system treats the DJ as
+# unavailable and warns — preventing typos from silently counting as "available".
+KNOWN_CELL_VALUES = {
+    "booked", "backup", "out", "maxed", "reserved", "stanford",
+    "ok", "ok to backup", "dad", "last", "aag",
+}
+
+
+def _warn_unknown_value(dj_name, value, context="check_dj_availability"):
+    """Print a warning when an unrecognized cell value is encountered."""
+    print(f'  ⚠️  Unknown matrix value for {dj_name}: "{value}" (in {context}) — treating as unavailable')
+
 
 # =============================================================================
 # SHARED UTILITY FUNCTIONS
@@ -467,7 +480,7 @@ def get_bulk_availability_data(year, service, spreadsheet, spreadsheet_id, start
                         continue
                     
                     # Check availability using existing logic
-                    can_book, can_backup = check_dj_availability(dj_name, value_str, date_obj, is_bold, year)
+                    can_book, can_backup = check_dj_availability(dj_name, value_str, date_obj, is_bold, year, warn=False)
                     if can_book:
                         available_to_book.append(dj_name)
                     elif can_backup:
@@ -765,7 +778,7 @@ def auto_clear_stale_cache(max_age_minutes=60):
     return False
 
 
-def check_dj_availability(dj_name, value, date_obj=None, is_bold=False, year=None):
+def check_dj_availability(dj_name, value, date_obj=None, is_bold=False, year=None, warn=True):
     """
     Check if a DJ is available based on their current status
     Returns: (can_be_booked, can_be_backup)
@@ -776,10 +789,17 @@ def check_dj_availability(dj_name, value, date_obj=None, is_bold=False, year=Non
         date_obj: Date object for the event
         is_bold: Whether the cell text is bold
         year: The year being checked (e.g., "2025", "2026", "2027") for year-specific rules
+        warn: Whether to print a warning for unknown cell values (False for summary/bulk callers)
     """
     value = str(value).strip() if value else ""
     value_lower = value.lower()
     is_weekend_day = date_obj and date_obj.weekday() >= 5 if date_obj else False
+    
+    # Guard: reject unknown cell values
+    if value and value_lower not in KNOWN_CELL_VALUES:
+        if warn:
+            _warn_unknown_value(dj_name, value)
+        return False, False
     
     # Special case for Henry on weekdays
     if dj_name == "Henry" and not is_weekend_day:
@@ -818,8 +838,8 @@ def check_dj_availability(dj_name, value, date_obj=None, is_bold=False, year=Non
             return False, True  # Available for backup only
         if value_lower == "out" or value_lower == "maxed":
             return False, False  # Not available at all
-        # Any other status - default to backup only
-        return False, True
+        # Any other status - not available (guard above catches unknowns)
+        return False, False
         
     if not value:  # Blank cell (for non-2026/2027 Felipe cases)
         if dj_name == "Stefano":
@@ -924,7 +944,7 @@ def analyze_availability(selected_data, date_obj, year=None):
             backup_count += 1
         # Only check availability for non-booked and non-backup DJs
         elif value_lower != "booked" and value_lower != "stanford":
-            can_book, can_backup = check_dj_availability(name, value, date_obj, is_bold, year)
+            can_book, can_backup = check_dj_availability(name, value, date_obj, is_bold, year, warn=False)
             if can_book:
                 available_for_booking.append(name)
             if can_backup:
