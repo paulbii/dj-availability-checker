@@ -75,6 +75,9 @@ def format_dj_status(dj_name, value, date_obj, is_bookable, is_backup, year=None
     if value and value_lower == "stanford":
         return f"{Fore.RED}{dj_name}: STANFORD{Style.RESET_ALL}"
     
+    if value and "reserved" in value_lower:
+        return f"{Fore.RED}{dj_name}: RESERVED{Style.RESET_ALL}"
+    
     if value and "backup" in value_lower:
         return f"{Fore.BLUE}{dj_name}: {value}{Style.RESET_ALL}"
     

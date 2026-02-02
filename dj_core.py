@@ -892,8 +892,8 @@ def analyze_availability(selected_data, date_obj, year=None):
             aag_reserved = True
             continue
         
-        # Check Stephanie RESERVED (counts as booking in 2026/2027 - she's unavailable)
-        if name == "Stephanie" and "reserved" in value_lower:
+        # RESERVED on any DJ counts as a booking (spot is held)
+        if "reserved" in value_lower and name != "AAG":
             booked_count += 1
             continue
         
