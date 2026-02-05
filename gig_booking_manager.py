@@ -71,6 +71,18 @@ DEFAULT_CREDENTIALS_PATH = os.path.join(
     "dj-availability-checker", "your-credentials.json"
 )
 
+# Formula templates for auto-creating new date rows
+# Column letters map to formulas. {row} will be replaced with actual row number.
+# Based on template from row 229 in 2026 sheet.
+ROW_FORMULA_TEMPLATES = {
+    "B": '=IF(T{row}<1,LEFT("(((((((",S{row})&"NO SPOTS"&LEFT(")))))))",S{row}),"")',
+    "C": '=IF(T{row}=1,LEFT("(((((((",S{row})&"1 SPOT"&LEFT(")))))))",S{row}),"")',
+    "E": '=if(or(weekday($A{row},2)>5),"OUT","")',
+    "G": '=if(or(weekday($A{row},2)<6,weekday($A{row},2)=7),"OUT","")',
+    "H": '=if(weekday($A{row},2)<6,"OUT","")',
+}
+# Columns D, F, I, J, K, L are left blank (data entry columns)
+
 
 def increment_tba(current_value):
     """
@@ -546,6 +558,52 @@ class SheetsClient:
         sheet = self.get_sheet(year)
         sheet.update_cell(row_num, col_num, value)
 
+    def create_date_row(self, date_obj, year):
+        """
+        Create a new row for a date in the availability matrix.
+        Inserts row chronologically, adds date to column A, and applies formula templates.
+        Returns the new row number (1-indexed).
+        """
+        sheet = self.get_sheet(year)
+        date_values = sheet.col_values(1)  # Column A - all dates
+        target_date = date_to_sheet_format(date_obj)
+
+        # Find insertion point (first date that comes after our target date)
+        # Assume dates are in ascending chronological order
+        insert_row = len(date_values) + 1  # Default: append at end
+
+        for i, existing_date_str in enumerate(date_values):
+            if not existing_date_str.strip():
+                continue
+            try:
+                # Parse existing date to compare
+                # Format is like "Thu 12/31" - extract month/day
+                parts = existing_date_str.split()
+                if len(parts) >= 2:
+                    month_day = parts[1]  # "12/31"
+                    month, day = map(int, month_day.split('/'))
+                    existing_date = datetime(year, month, day)
+
+                    if existing_date > date_obj:
+                        insert_row = i + 1  # Found first date after target
+                        break
+            except (ValueError, IndexError):
+                continue
+
+        # Insert blank row
+        sheet.insert_row([], insert_row)
+
+        # Write date to column A
+        self.write_cell(insert_row, 1, target_date, year)
+
+        # Apply formula templates to appropriate columns
+        for col_letter, formula_template in ROW_FORMULA_TEMPLATES.items():
+            col_num = ord(col_letter) - ord('A') + 1  # Convert letter to 1-indexed number
+            formula = formula_template.format(row=insert_row)
+            self.write_cell(insert_row, col_num, formula, year)
+
+        return insert_row
+
 
 class MockSheetsClient:
     """Mock client for dry-run testing. Prints actions instead of executing."""
@@ -927,12 +985,18 @@ class GigBookingManager:
         print("— Finding date in matrix...")
         row_num = self.sheets.find_date_row(booking["date"], year)
         if row_num is None:
-            msg = f"Could not find {booking['date_display']} in the {year} sheet."
-            print(f"  ERROR: {msg}")
-            if not self.dry_run:
-                show_warning_dialog(msg)
-            return False
-        print(f"  Found at row {row_num}.")
+            # Date doesn't exist - create new row
+            print(f"  Date {booking['date_display']} not found in {year} sheet")
+            if self.dry_run:
+                print(f"  [DRY RUN] Would create new row for {booking['date_display']}")
+                # For dry-run, use a placeholder row number
+                row_num = 999
+            else:
+                print(f"  Creating new row for {booking['date_display']}...")
+                row_num = self.sheets.create_date_row(booking["date"], year)
+                print(f"  ✓ Created new row at row {row_num}")
+        else:
+            print(f"  Found at row {row_num}.")
         print()
 
         # -----------------------------------------------------------------
