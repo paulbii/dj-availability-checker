@@ -11,9 +11,16 @@ This system integrates three data sources to provide comprehensive DJ availabili
 
 ## Features
 
-✅ **Dual Interface**
+✅ **Availability Checking**
 - Terminal application for quick checks (`check_2026.py`, `check_2027.py`)
 - Web application for team access (Streamlit app)
+
+✅ **Gig Booking Manager**
+- Automated booking workflow from FileMaker to availability matrix and calendar
+- Auto-creates missing date rows with proper formulas
+- Supports multiple bookings per DJ per date
+- Nestldown venue special timing rules
+- Backup DJ assignment with calendar conflict checking
 
 ✅ **Performance Optimized**
 - Parallel API requests for 18x speed improvement
@@ -60,7 +67,7 @@ python3 check_2026.py
 
 ### Usage
 
-**Terminal Interface:**
+**Availability Checking (Terminal):**
 ```bash
 python3 check_2026.py
 # Enter date in MM-DD format: 05-16
@@ -69,20 +76,42 @@ python3 check_2027.py
 # Enter date in MM-DD format: 01-15
 ```
 
-**Web Interface:**
+**Availability Checking (Web):**
 
 Visit your deployed Streamlit app at: `https://your-app.streamlit.app`
+
+**Gig Booking Manager:**
+```bash
+# From FileMaker (production - called via AppleScript)
+python3 gig_booking_manager.py /tmp/gig_booking.json
+
+# Testing with sample files
+python3 gig_booking_manager.py sample_bookings/sample_regular_booking.json --dry-run
+python3 gig_booking_manager.py sample_bookings/sample_regular_booking.json --test
+
+# Flags:
+#   --dry-run : Simulate all operations without writing (reads real data)
+#   --test    : Real writes, but calendar invites go to paul@bigfundj.com
+```
 
 ## File Structure
 
 ```
 dj-availability-checker/
 ├── README.md                    # This file
+├── CHANGELOG.md                 # Version history and feature releases
 ├── dj_core.py                   # Shared business logic
 ├── check_2026.py                # Terminal interface for 2026
 ├── check_2027.py                # Terminal interface for 2027
 ├── dj_app.py                    # Streamlit web application
+├── gig_booking_manager.py       # Automated booking workflow (FileMaker → Matrix → Calendar)
 ├── your-credentials.json        # Google API credentials (not in git)
+├── sample_bookings/             # Test samples for gig_booking_manager
+│   ├── README.md
+│   └── *.json                   # Sample booking files
+├── archive/                     # Deprecated tools
+│   ├── gig_to_calendar.py
+│   └── README.md
 └── docs/                        # Detailed documentation
     ├── README.md
     ├── 2026_AAG_UPDATES.md
@@ -196,7 +225,13 @@ git push
 
 ## Recent Updates
 
-See [git log](https://github.com/YOUR_USERNAME/dj-availability-checker/commits/main) for full version history.
+**Latest Release: 2026-02-05** - Gig Booking Manager Enhancements
+- ✨ Auto-create missing date rows in availability matrix
+- ✨ Multiple bookings per DJ per date support
+- ✨ Nestldown venue special calendar timing
+- 🔧 Improved dry-run mode for realistic testing
+
+See [CHANGELOG.md](CHANGELOG.md) for detailed release notes and [git log](https://github.com/paulbii/dj-availability-checker/commits/main) for full commit history.
 
 ---
 
