@@ -1,0 +1,22 @@
+{
+  "_comment": "First booking for Paul on 2026-09-12 - use this BEFORE sample_second_booking_same_day.json",
+  "_usage": "Step 1: python3 gig_booking_manager.py sample_bookings/sample_first_booking_paul.json --dry-run",
+
+  "event_date": "2026-09-12",
+  "assigned_dj": "Paul",
+  "secondary_dj": "",
+
+  "client_name": "Martinez Wedding",
+
+  "venue_name": "Kohl Mansion",
+  "venue_street": "2750 Adeline Dr",
+  "venue_city_state_zip": "Burlingame, CA 94010",
+
+  "setup_time": "3:00 PM",
+  "clear_time": "9:00 PM",
+
+  "sound_type": "Ceremony",
+  "has_ceremony_sound": true,
+
+  "planner_name": ""
+}
