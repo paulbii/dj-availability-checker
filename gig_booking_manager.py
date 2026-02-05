@@ -108,6 +108,54 @@ def increment_tba(current_value):
     return new_booked
 
 
+def count_booked_events(cell_value):
+    """
+    Count the number of BOOKED events in a matrix cell value.
+    '' or 'OUT' → 0
+    'BOOKED' → 1
+    'BOOKED x 2' → 2
+    'BOOKED x 3' → 3
+    """
+    if not cell_value or cell_value.strip() == "":
+        return 0
+
+    value_upper = cell_value.upper().strip()
+
+    if value_upper == "BOOKED":
+        return 1
+    elif value_upper.startswith("BOOKED X "):
+        try:
+            n = int(value_upper.replace("BOOKED X ", ""))
+            return n
+        except ValueError:
+            return 0
+    else:
+        return 0
+
+
+def increment_booked(current_value):
+    """
+    Increment a DJ's BOOKED cell value when adding multiple bookings.
+    '' → 'BOOKED', 'BOOKED' → 'BOOKED x 2', 'BOOKED x 2' → 'BOOKED x 3'
+    """
+    if not current_value or current_value.strip() == "":
+        return "BOOKED"
+
+    value_upper = current_value.upper().strip()
+
+    if value_upper == "BOOKED":
+        return "BOOKED x 2"
+    elif value_upper.startswith("BOOKED X "):
+        try:
+            n = int(value_upper.replace("BOOKED X ", ""))
+            return f"BOOKED x {n + 1}"
+        except ValueError:
+            return "BOOKED x 2"
+    else:
+        # Cell has some other value (OUT, BACKUP, etc.) - shouldn't happen
+        return current_value
+
+
 # =============================================================================
 # BOOKING DATA PARSING
 # =============================================================================
@@ -688,6 +736,58 @@ def show_warning_dialog(message):
     subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=60)
 
 
+def show_multiple_booking_dialog(dj_name, date_display, existing_count, existing_events):
+    """
+    Ask user if they want to add another booking for a DJ who already has event(s).
+    Returns True if user wants to proceed, False if they want to cancel.
+
+    Args:
+        dj_name: DJ short name (e.g., "Paul")
+        date_display: Formatted date string (e.g., "06/15/2026")
+        existing_count: Number of existing bookings (1, 2, etc.)
+        existing_events: List of event title strings from calendar
+    """
+    # Build event summary
+    event_count_text = f"{existing_count} event" if existing_count == 1 else f"{existing_count} events"
+
+    if existing_count == 1 and existing_events:
+        # Show details for single event
+        event_info = existing_events[0]  # e.g., "[PB] Smith Wedding"
+        message = (
+            f"{dj_name} already has an event in the availability matrix and calendar "
+            f"on {date_display}:\\n\\n{event_info}\\n\\n"
+            f"Add this new booking anyway?"
+        )
+    elif existing_count == 2:
+        # Just say "2 events"
+        message = (
+            f"{dj_name} already has 2 booked events in the availability matrix and calendar "
+            f"on {date_display}.\\n\\n"
+            f"Add this new booking anyway?"
+        )
+    else:
+        # For 3+, say the number
+        message = (
+            f"{dj_name} already has {existing_count} booked events in the availability matrix and calendar "
+            f"on {date_display}.\\n\\n"
+            f"Add this new booking anyway?"
+        )
+
+    msg_esc = message.replace('"', '\\"')
+    script = f'''
+    set userChoice to button returned of (display dialog "{msg_esc}" with title "Multiple Bookings" buttons {{"Cancel", "Add Booking"}} default button "Add Booking" with icon caution)
+    return userChoice
+    '''
+
+    result = subprocess.run(
+        ["osascript", "-e", script],
+        capture_output=True, text=True, timeout=60,
+    )
+
+    choice = result.stdout.strip()
+    return choice == "Add Booking"
+
+
 def show_backup_dialog(date_display, spots_remaining, candidates, existing_backup):
     """
     Show backup selection dialog.
@@ -847,10 +947,11 @@ class GigBookingManager:
         print()
 
         # -----------------------------------------------------------------
-        # Phase 1: VALIDATE MATRIX
+        # Phase 1: VALIDATE MATRIX & CALENDAR
         # -----------------------------------------------------------------
-        print("— Phase 1: Validating matrix...")
+        print("— Phase 1: Validating matrix and calendar...")
         dj_short = booking["dj_short_name"]
+        allow_multiple = False  # Track if user approved multiple bookings
 
         if not booking["is_unassigned"]:
             if dj_short not in col_map:
@@ -860,49 +961,58 @@ class GigBookingManager:
                     show_warning_dialog(msg)
                 return False
 
+            # Count existing bookings in matrix
             cell_value = row_data.get(dj_short, "")
-            if cell_value.strip():
-                msg = (
-                    f"{dj_short}'s cell for {booking['date_display']} "
-                    f"already shows \"{cell_value}\".\n\n"
-                    f"Availability matrix was NOT updated.\n"
-                    f"Please investigate and re-run."
+            matrix_count = count_booked_events(cell_value)
+
+            # Count existing bookings in calendar
+            if self.dry_run:
+                print("  [DRY RUN] Skipping calendar check")
+                cal_conflicts = []
+            else:
+                cal_conflicts = check_calendar_conflicts(
+                    booking["date"], booking["dj_initials_bracket"]
                 )
-                print(f"  ⚠️  CONFLICT: {dj_short} cell = '{cell_value}'")
-                self.log(f"HALTED: Matrix conflict — {dj_short} = '{cell_value}'")
+            calendar_count = len(cal_conflicts)
+
+            print(f"  Matrix shows: {matrix_count} booking(s) for {dj_short}")
+            print(f"  Calendar shows: {calendar_count} event(s) for {booking['dj_initials_bracket']}")
+
+            # Validate matrix and calendar agree
+            if matrix_count != calendar_count:
+                msg = (
+                    f"Matrix/calendar mismatch for {dj_short} on {booking['date_display']}:\n\n"
+                    f"Matrix cell: \"{cell_value}\" ({matrix_count} booking(s))\n"
+                    f"Calendar: {calendar_count} event(s)\n\n"
+                    f"These numbers must match. Please investigate and fix before proceeding."
+                )
+                print(f"  ⚠️  MISMATCH: Matrix={matrix_count}, Calendar={calendar_count}")
+                self.log(f"HALTED: Matrix/calendar mismatch — {dj_short}")
                 if not self.dry_run:
                     show_warning_dialog(msg)
                 return False
-            print(f"  ✓ {dj_short}'s cell is blank — OK to write")
+
+            # If DJ already has bookings, ask for confirmation
+            if matrix_count > 0:
+                if self.dry_run:
+                    print(f"  [DRY RUN] {dj_short} has {matrix_count} existing booking(s) — would show dialog")
+                    allow_multiple = True
+                else:
+                    user_approved = show_multiple_booking_dialog(
+                        dj_short, booking['date_display'], matrix_count, cal_conflicts
+                    )
+                    if user_approved:
+                        print(f"  ✓ User approved adding booking #{matrix_count + 1}")
+                        allow_multiple = True
+                    else:
+                        msg = f"User cancelled adding multiple booking for {dj_short}."
+                        print(f"  ⚠️  CANCELLED: {msg}")
+                        self.log(f"HALTED: {msg}")
+                        return False
+            else:
+                print(f"  ✓ {dj_short}'s cell is blank — OK to write")
         else:
             print(f"  Unassigned booking — will update TBA column")
-        print()
-
-        # -----------------------------------------------------------------
-        # Phase 1: VALIDATE CALENDAR
-        # -----------------------------------------------------------------
-        print("— Phase 1: Checking calendar for conflicts...")
-        if self.dry_run:
-            print("  [DRY RUN] Skipping calendar check")
-            cal_conflicts = []
-        else:
-            cal_conflicts = check_calendar_conflicts(
-                booking["date"], booking["dj_initials_bracket"]
-            )
-
-        if cal_conflicts:
-            conflict_list = "\n".join(cal_conflicts)
-            msg = (
-                f"Calendar conflict found for {booking['dj_initials_bracket']} "
-                f"on {booking['date_display']}:\n\n{conflict_list}\n\n"
-                f"No changes made. Please investigate."
-            )
-            print(f"  ⚠️  CONFLICT: {conflict_list}")
-            self.log(f"HALTED: Calendar conflict — {conflict_list}")
-            if not self.dry_run:
-                show_warning_dialog(msg)
-            return False
-        print(f"  ✓ No calendar conflicts for {booking['dj_initials_bracket']}")
         print()
 
         # =================================================================
@@ -915,9 +1025,19 @@ class GigBookingManager:
         print("— Phase 2: Writing to matrix...")
         if not booking["is_unassigned"]:
             col_num = col_map[dj_short]
-            self.sheets.write_cell(row_num, col_num, "BOOKED", year)
-            self.log(f"Matrix: {dj_short} → BOOKED")
-            row_data[dj_short] = "BOOKED"  # Update local copy
+            current_value = row_data.get(dj_short, "")
+
+            if allow_multiple:
+                # Increment existing BOOKED value
+                new_value = increment_booked(current_value)
+                self.sheets.write_cell(row_num, col_num, new_value, year)
+                self.log(f"Matrix: {dj_short} → '{new_value}'")
+                row_data[dj_short] = new_value  # Update local copy
+            else:
+                # First booking - write BOOKED
+                self.sheets.write_cell(row_num, col_num, "BOOKED", year)
+                self.log(f"Matrix: {dj_short} → BOOKED")
+                row_data[dj_short] = "BOOKED"  # Update local copy
         else:
             tba_col = col_map["TBA"]
             current_tba = row_data.get("TBA", "")
