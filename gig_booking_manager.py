@@ -872,10 +872,9 @@ class GigBookingManager:
         self.credentials_path = credentials_path or DEFAULT_CREDENTIALS_PATH
         self.actions = []  # Track what happened for summary
 
-        if dry_run:
-            self.sheets = MockSheetsClient()
-        else:
-            self.sheets = SheetsClient(self.credentials_path)
+        # Always use real SheetsClient for reads, even in dry-run
+        # Dry-run flag prevents writes but allows reads
+        self.sheets = SheetsClient(self.credentials_path)
 
     def log(self, action):
         """Log an action for the summary."""
@@ -1026,19 +1025,28 @@ class GigBookingManager:
             if allow_multiple:
                 # Increment existing BOOKED value
                 new_value = increment_booked(current_value)
-                self.sheets.write_cell(row_num, col_num, new_value, year)
+                if self.dry_run:
+                    print(f"  [DRY RUN] Would write '{new_value}' to row {row_num}, col {col_num} in {year} sheet")
+                else:
+                    self.sheets.write_cell(row_num, col_num, new_value, year)
                 self.log(f"Matrix: {dj_short} → '{new_value}'")
                 row_data[dj_short] = new_value  # Update local copy
             else:
                 # First booking - write BOOKED
-                self.sheets.write_cell(row_num, col_num, "BOOKED", year)
+                if self.dry_run:
+                    print(f"  [DRY RUN] Would write 'BOOKED' to row {row_num}, col {col_num} in {year} sheet")
+                else:
+                    self.sheets.write_cell(row_num, col_num, "BOOKED", year)
                 self.log(f"Matrix: {dj_short} → BOOKED")
                 row_data[dj_short] = "BOOKED"  # Update local copy
         else:
             tba_col = col_map["TBA"]
             current_tba = row_data.get("TBA", "")
             new_tba = increment_tba(current_tba)
-            self.sheets.write_cell(row_num, tba_col, new_tba, year)
+            if self.dry_run:
+                print(f"  [DRY RUN] Would write '{new_tba}' to row {row_num}, col {tba_col} in {year} sheet")
+            else:
+                self.sheets.write_cell(row_num, tba_col, new_tba, year)
             self.log(f"Matrix: TBA → '{new_tba}'")
             row_data["TBA"] = new_tba  # Update local copy
         print()
@@ -1106,13 +1114,10 @@ class GigBookingManager:
                 backup_initials_bracket = f"[{get_dj_initials(backup_dj)}]"
                 print(f"  Checking calendar for {backup_initials_bracket}...")
 
-                if self.dry_run:
-                    backup_cal_conflicts = []
-                    print("  [DRY RUN] Skipping backup calendar check")
-                else:
-                    backup_cal_conflicts = check_calendar_conflicts(
-                        booking["date"], backup_initials_bracket
-                    )
+                # Check backup calendar conflicts (always check, even in dry-run)
+                backup_cal_conflicts = check_calendar_conflicts(
+                    booking["date"], backup_initials_bracket
+                )
 
                 if backup_cal_conflicts:
                     conflict_list = "\n".join(backup_cal_conflicts)
@@ -1129,7 +1134,10 @@ class GigBookingManager:
                 else:
                     # Write backup to matrix
                     backup_col = col_map[backup_dj]
-                    self.sheets.write_cell(row_num, backup_col, "BACKUP", year)
+                    if self.dry_run:
+                        print(f"  [DRY RUN] Would write 'BACKUP' to row {row_num}, col {backup_col} in {year} sheet")
+                    else:
+                        self.sheets.write_cell(row_num, backup_col, "BACKUP", year)
                     self.log(f"Matrix: {backup_dj} → BACKUP")
                     print(f"  ✓ {backup_dj} → BACKUP written to matrix")
             elif not existing_backup and not self.dry_run:
