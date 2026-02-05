@@ -139,7 +139,7 @@ def _warn_unknown_value(dj_name, value, context="check_dj_availability"):
 
 # =============================================================================
 # SHARED UTILITY FUNCTIONS
-# Used by dj_core, gig_booking_manager, and gig_to_calendar
+# Used by dj_core, gig_booking_manager, check_dj, and dj_app
 # =============================================================================
 
 def get_dj_short_name(full_name):
