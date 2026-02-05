@@ -87,6 +87,20 @@ The `--dry-run` flag will:
    Result: New row created with formulas in columns B, C, E, G, H
 4. **Verify in Google Sheets** that the row was inserted in chronological order and formulas work correctly
 
+### 7. `sample_new_date_07_24_27.json`
+**Purpose:** ~~Test auto-create date row feature for 2027~~ **DEPRECATED - DO NOT USE**
+**Status:** ⚠️ **AUTO-CREATE DISABLED FOR 2027**
+
+The 2027 availability matrix has a different formula structure than 2026. Row insertion causes catastrophic damage by breaking formulas with absolute row references, resulting in #REF! errors throughout the sheet.
+
+**For 2027 bookings:** You must manually add date rows to the sheet before running gig_booking_manager.
+
+**What happens if you try:**
+```bash
+python3 gig_booking_manager.py sample_bookings/sample_new_date_07_24_27.json
+```
+Result: `ERROR: Auto-create disabled for 2027 sheet (formulas incompatible)`
+
 ## Field Reference
 
 ```json
@@ -120,7 +134,8 @@ Before using gig_booking_manager in production, test these scenarios:
 - [ ] Nestldown minimony (sample_nestldown_minimony.json)
 - [ ] Unassigned/TBA booking (sample_unassigned_booking.json)
 - [ ] Multiple bookings same day (sample_second_booking_same_day.json)
-- [ ] Auto-create missing date row (sample_new_date_12_17_26.json)
+- [ ] Auto-create missing date row 2026 (sample_new_date_12_17_26.json)
+- [ ] ~~Auto-create missing date row 2027~~ (DISABLED - incompatible formulas)
 - [ ] Matrix/calendar mismatch (manually create mismatch to test error)
 - [ ] Backup DJ selection dialog
 

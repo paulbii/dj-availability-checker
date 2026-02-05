@@ -1,0 +1,22 @@
+{
+  "_comment": "Test booking for 7/22/27 - should auto-create new row in 2027 availability matrix",
+  "_usage": "python3 gig_booking_manager.py sample_bookings/sample_new_date_07_24_27.json --dry-run",
+
+  "event_date": "2027-07-22",
+  "assigned_dj": "Henry",
+  "secondary_dj": "",
+
+  "client_name": "Johnson Wedding",
+
+  "venue_name": "Carmel Valley Ranch",
+  "venue_street": "1 Old Ranch Road",
+  "venue_city_state_zip": "Carmel, CA 93923",
+
+  "setup_time": "4:00",
+  "clear_time": "10:00",
+
+  "sound_type": "Ceremony",
+  "has_ceremony_sound": true,
+
+  "planner_name": "Sarah Martinez"
+}
