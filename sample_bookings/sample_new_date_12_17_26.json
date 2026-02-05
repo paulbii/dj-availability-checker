@@ -1,0 +1,22 @@
+{
+  "_comment": "Test booking for 12/17/26 - should auto-create new row in availability matrix",
+  "_usage": "python3 gig_booking_manager.py sample_bookings/sample_new_date_12_17_26.json --dry-run",
+
+  "event_date": "2026-12-17",
+  "assigned_dj": "Paul",
+  "secondary_dj": "",
+
+  "client_name": "Smith Wedding",
+
+  "venue_name": "Garden Valley Ranch",
+  "venue_street": "498 Fisher Lake Drive",
+  "venue_city_state_zip": "Santa Cruz, CA 95062",
+
+  "setup_time": "5:00",
+  "clear_time": "11:00",
+
+  "sound_type": "Standard Speakers",
+  "has_ceremony_sound": false,
+
+  "planner_name": ""
+}

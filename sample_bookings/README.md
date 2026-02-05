@@ -68,6 +68,25 @@ The `--dry-run` flag will:
 **Event:** 4:00 PM - 7:00 PM (3 hours)
 **Expected:** Normal timing (2:00 PM - 8:00 PM calendar)
 
+### 6. `sample_new_date_12_17_26.json`
+**Purpose:** Test auto-create date row feature
+**Tests:** Creating a new row with formulas when date doesn't exist in matrix
+**DJ:** Paul
+**Date:** 12/17/2026 (Thursday)
+**How to test:**
+1. **Verify 12/17/26 doesn't exist** in the 2026 availability matrix
+2. **Run with --dry-run first**:
+   ```bash
+   python3 gig_booking_manager.py sample_bookings/sample_new_date_12_17_26.json --dry-run
+   ```
+   Result: Should show "[DRY RUN] Would create new row for Thursday 12/17/2026"
+3. **Run without --dry-run** to actually create the row:
+   ```bash
+   python3 gig_booking_manager.py sample_bookings/sample_new_date_12_17_26.json
+   ```
+   Result: New row created with formulas in columns B, C, E, G, H
+4. **Verify in Google Sheets** that the row was inserted in chronological order and formulas work correctly
+
 ## Field Reference
 
 ```json
@@ -101,6 +120,7 @@ Before using gig_booking_manager in production, test these scenarios:
 - [ ] Nestldown minimony (sample_nestldown_minimony.json)
 - [ ] Unassigned/TBA booking (sample_unassigned_booking.json)
 - [ ] Multiple bookings same day (sample_second_booking_same_day.json)
+- [ ] Auto-create missing date row (sample_new_date_12_17_26.json)
 - [ ] Matrix/calendar mismatch (manually create mismatch to test error)
 - [ ] Backup DJ selection dialog
 

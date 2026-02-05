@@ -1003,10 +1003,15 @@ class GigBookingManager:
         # Step 4: Read row data
         # -----------------------------------------------------------------
         print("— Reading matrix data...")
-        row_data = self.sheets.get_row_data(row_num, year)
-        for dj, val in row_data.items():
-            if val:
-                print(f"  {dj}: {val}")
+        # If dry-run and row doesn't exist (placeholder 999), skip the read
+        if self.dry_run and row_num == 999:
+            print("  [DRY RUN] Row doesn't exist yet - no data to read")
+            row_data = {}
+        else:
+            row_data = self.sheets.get_row_data(row_num, year)
+            for dj, val in row_data.items():
+                if val:
+                    print(f"  {dj}: {val}")
         print()
 
         # -----------------------------------------------------------------
