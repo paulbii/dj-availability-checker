@@ -11,8 +11,8 @@
   "venue_street": "10155 Waterman Gap Road",
   "venue_city_state_zip": "Los Gatos, CA 95033",
 
-  "setup_time": "4:00 PM",
-  "clear_time": "7:00 PM",
+  "setup_time": "4:00",
+  "clear_time": "7:00",
 
   "sound_type": "Ceremony",
   "has_ceremony_sound": true,

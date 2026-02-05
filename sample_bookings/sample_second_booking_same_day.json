@@ -13,8 +13,8 @@
   "venue_street": "210 E Main St",
   "venue_city_state_zip": "Los Gatos, CA 95030",
 
-  "setup_time": "6:00 PM",
-  "clear_time": "11:00 PM",
+  "setup_time": "6:00",
+  "clear_time": "11:00",
 
   "sound_type": "Standard Speakers",
   "has_ceremony_sound": false,

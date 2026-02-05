@@ -12,8 +12,8 @@
   "venue_street": "2750 Adeline Dr",
   "venue_city_state_zip": "Burlingame, CA 94010",
 
-  "setup_time": "3:00 PM",
-  "clear_time": "9:00 PM",
+  "setup_time": "3:00",
+  "clear_time": "9:00",
 
   "sound_type": "Ceremony",
   "has_ceremony_sound": true,

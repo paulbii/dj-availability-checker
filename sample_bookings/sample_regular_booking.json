@@ -11,8 +11,8 @@
   "venue_street": "14831 Pierce Rd",
   "venue_city_state_zip": "Saratoga, CA 95070",
 
-  "setup_time": "4:00 PM",
-  "clear_time": "10:00 PM",
+  "setup_time": "4:00",
+  "clear_time": "10:00",
 
   "sound_type": "Ceremony",
   "has_ceremony_sound": true,

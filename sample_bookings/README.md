@@ -82,8 +82,8 @@ The `--dry-run` flag will:
   "venue_street": "Street address",
   "venue_city_state_zip": "City, State ZIP",
 
-  "setup_time": "12-hour format with AM/PM (e.g., '2:40 PM')",
-  "clear_time": "12-hour format with AM/PM (e.g., '8:40 PM')",
+  "setup_time": "12-hour format WITHOUT AM/PM (e.g., '2:40' or '3:00')",
+  "clear_time": "12-hour format WITHOUT AM/PM (e.g., '8:40' or '9:00')",
 
   "sound_type": "'Ceremony' or 'Standard Speakers'",
   "has_ceremony_sound": true or false,
