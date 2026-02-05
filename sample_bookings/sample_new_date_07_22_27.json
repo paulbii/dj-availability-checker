@@ -1,6 +1,6 @@
 {
   "_comment": "Test booking for 7/22/27 - should auto-create new row in 2027 availability matrix",
-  "_usage": "python3 gig_booking_manager.py sample_bookings/sample_new_date_07_24_27.json --dry-run",
+  "_usage": "python3 gig_booking_manager.py sample_bookings/sample_new_date_07_22_27.json --dry-run",
 
   "event_date": "2027-07-22",
   "assigned_dj": "Henry",

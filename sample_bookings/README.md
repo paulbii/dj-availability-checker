@@ -87,19 +87,26 @@ The `--dry-run` flag will:
    Result: New row created with formulas in columns B, C, E, G, H
 4. **Verify in Google Sheets** that the row was inserted in chronological order and formulas work correctly
 
-### 7. `sample_new_date_07_24_27.json`
-**Purpose:** ~~Test auto-create date row feature for 2027~~ **DEPRECATED - DO NOT USE**
-**Status:** ⚠️ **AUTO-CREATE DISABLED FOR 2027**
+### 7. `sample_new_date_07_22_27.json`
+**Purpose:** Test auto-create date row feature for 2027
+**Tests:** Creating a new row with formulas when date doesn't exist in 2027 matrix
+**DJ:** Henry
+**Date:** 7/22/2027 (Thursday)
+**How to test:**
+1. **Verify 7/22/27 doesn't exist** in the 2027 availability matrix
+2. **Run with --dry-run first**:
+   ```bash
+   python3 gig_booking_manager.py sample_bookings/sample_new_date_07_22_27.json --dry-run
+   ```
+   Result: Should show "[DRY RUN] Would create new row for Thursday 7/22/2027"
+3. **Run without --dry-run** to actually create the row:
+   ```bash
+   python3 gig_booking_manager.py sample_bookings/sample_new_date_07_22_27.json
+   ```
+   Result: New row created in 2027 sheet with formulas in columns B, C, E, G, H
+4. **Verify in Google Sheets** that the row was inserted in chronological order and formulas work correctly
 
-The 2027 availability matrix has a different formula structure than 2026. Row insertion causes catastrophic damage by breaking formulas with absolute row references, resulting in #REF! errors throughout the sheet.
-
-**For 2027 bookings:** You must manually add date rows to the sheet before running gig_booking_manager.
-
-**What happens if you try:**
-```bash
-python3 gig_booking_manager.py sample_bookings/sample_new_date_07_24_27.json
-```
-Result: `ERROR: Auto-create disabled for 2027 sheet (formulas incompatible)`
+**Note:** The 2027 sheet originally used a dynamic array formula (`=FILTER(SEQUENCE(...))`) which was incompatible with row insertion. This has been converted to static date values, making auto-create safe to use.
 
 ## Field Reference
 
@@ -135,7 +142,7 @@ Before using gig_booking_manager in production, test these scenarios:
 - [ ] Unassigned/TBA booking (sample_unassigned_booking.json)
 - [ ] Multiple bookings same day (sample_second_booking_same_day.json)
 - [ ] Auto-create missing date row 2026 (sample_new_date_12_17_26.json)
-- [ ] ~~Auto-create missing date row 2027~~ (DISABLED - incompatible formulas)
+- [ ] Auto-create missing date row 2027 (sample_new_date_07_22_27.json)
 - [ ] Matrix/calendar mismatch (manually create mismatch to test error)
 - [ ] Backup DJ selection dialog
 

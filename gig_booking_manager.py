@@ -985,16 +985,8 @@ class GigBookingManager:
         print("— Finding date in matrix...")
         row_num = self.sheets.find_date_row(booking["date"], year)
         if row_num is None:
-            # Date doesn't exist
+            # Date doesn't exist - create new row
             print(f"  Date {booking['date_display']} not found in {year} sheet")
-
-            # SAFETY: Only allow auto-create for 2026
-            # 2027 has different formula structure that breaks with row insertion
-            if year == 2027:
-                print(f"  ERROR: Auto-create disabled for 2027 sheet (formulas incompatible)")
-                print(f"  Please manually add {booking['date_display']} to the 2027 sheet first")
-                return
-
             if self.dry_run:
                 print(f"  [DRY RUN] Would create new row for {booking['date_display']}")
                 # For dry-run, use a placeholder row number
