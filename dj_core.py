@@ -274,8 +274,15 @@ def convert_times_to_24h(start_str, end_str):
 def calculate_event_times(booking):
     """
     Calculate calendar event start and end times.
-    Start = event start - arrival offset
-    End = event end + 60 minutes (teardown), capped at 23:59
+
+    Special case - Nestldown full events:
+    - 6-hour event → 9-hour calendar (extend 1:40 before, 1:20 after)
+    - 7-hour event → 10-hour calendar (extend 1:40 before, 1:20 after)
+    - 3-hour event (minimony) → use normal rules
+
+    Normal rules:
+    - Start = event start - arrival offset (90 or 120 minutes)
+    - End = event end + 60 minutes (teardown), capped at 23:59
     """
     if not booking["start_time"] or not booking["end_time"]:
         return None, None
@@ -284,15 +291,27 @@ def calculate_event_times(booking):
         booking["start_time"], booking["end_time"]
     )
 
-    arrival_offset = calculate_arrival_offset(
-        booking["sound_type"], booking["has_ceremony"]
-    )
-
     start_dt = booking["date"].replace(hour=start_h, minute=start_m)
-    cal_start = start_dt - timedelta(minutes=arrival_offset)
-
     end_dt = booking["date"].replace(hour=end_h, minute=end_m)
-    cal_end = end_dt + timedelta(minutes=60)
+
+    # Calculate event duration in hours
+    event_duration_hours = (end_dt - start_dt).total_seconds() / 3600
+
+    # Check for Nestldown special case
+    venue_name = booking.get("venue_name", "")
+    is_nestldown = "nestldown" in venue_name.lower()
+
+    if is_nestldown and event_duration_hours in [6.0, 7.0]:
+        # Nestldown full event: extend 1:40 before, 1:20 after
+        cal_start = start_dt - timedelta(minutes=100)
+        cal_end = end_dt + timedelta(minutes=80)
+    else:
+        # Normal rules
+        arrival_offset = calculate_arrival_offset(
+            booking["sound_type"], booking["has_ceremony"]
+        )
+        cal_start = start_dt - timedelta(minutes=arrival_offset)
+        cal_end = end_dt + timedelta(minutes=60)
 
     midnight = booking["date"].replace(hour=23, minute=59)
     if cal_end > midnight:
