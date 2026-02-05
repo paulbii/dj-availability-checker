@@ -1,8 +1,8 @@
 {
-  "_comment": "First booking for Paul on 2026-09-12 - use this BEFORE sample_second_booking_same_day.json",
-  "_usage": "Step 1: python3 gig_booking_manager.py sample_bookings/sample_first_booking_paul.json --dry-run",
+  "_comment": "First booking for Paul on 2026-12-31 (New Year's Eve) - use this BEFORE sample_second_booking_same_day.json",
+  "_usage": "Step 1: python3 gig_booking_manager.py sample_bookings/sample_first_booking_paul.json (NO --dry-run!)",
 
-  "event_date": "2026-09-12",
+  "event_date": "2026-12-31",
   "assigned_dj": "Paul",
   "secondary_dj": "",
 

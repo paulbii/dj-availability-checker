@@ -36,14 +36,30 @@ The `--dry-run` flag will:
 **DJ:** Unassigned
 **Result:** Should increment TBA column (BOOKED, BOOKED x 2, etc.)
 
-### 4. `sample_second_booking_same_day.json`
-**Purpose:** Test multiple bookings on same day
+### 4. `sample_first_booking_paul.json` + `sample_second_booking_same_day.json`
+**Purpose:** Test multiple bookings on same day (New Year's Eve 2026)
 **Tests:** Multiple booking confirmation dialog
-**DJ:** Paul on 2026-09-12
+**DJ:** Paul on 2026-12-31
 **How to test:**
-1. First add a booking for Paul on 2026-09-12 (using sample_regular_booking.json, edit to Paul and that date)
-2. Then run this file - should show dialog asking if you want to add a 2nd booking
-3. If approved, matrix cell should change: BOOKED → BOOKED x 2
+1. **Run first booking WITHOUT --dry-run** to create actual matrix/calendar data:
+   ```bash
+   python3 gig_booking_manager.py sample_bookings/sample_first_booking_paul.json
+   ```
+   Result: Paul's cell shows "BOOKED", calendar has Martinez Wedding event
+
+2. **Run second booking WITH --dry-run** to test the dialog:
+   ```bash
+   python3 gig_booking_manager.py sample_bookings/sample_second_booking_same_day.json --dry-run
+   ```
+   Result: Dialog appears asking "Paul already has an event... Add this new booking anyway?"
+
+3. **If you want to complete the test** (run without --dry-run):
+   - Matrix cell changes: BOOKED → BOOKED x 2
+   - Calendar gets Chen & Lee event
+
+4. **Clean up test data:**
+   - Matrix: Clear Paul's cell on 12/31/2026
+   - Calendar: Delete both test events from Gigs calendar
 
 ### 5. `sample_nestldown_minimony.json`
 **Purpose:** 3-hour Nestldown event (minimony)

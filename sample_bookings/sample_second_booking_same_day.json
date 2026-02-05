@@ -1,9 +1,9 @@
 {
   "_comment": "Second booking for same DJ on same day - tests multiple booking dialog",
-  "_note": "Step 1: Run sample_first_booking_paul.json first. Step 2: Run this file to test the multiple booking dialog",
+  "_note": "Step 1: Run sample_first_booking_paul.json WITHOUT --dry-run. Step 2: Run this file WITH --dry-run to test dialog",
   "_usage": "Step 2: python3 gig_booking_manager.py sample_bookings/sample_second_booking_same_day.json --dry-run",
 
-  "event_date": "2026-09-12",
+  "event_date": "2026-12-31",
   "assigned_dj": "Paul",
   "secondary_dj": "",
 
