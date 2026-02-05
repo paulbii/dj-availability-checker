@@ -965,14 +965,10 @@ class GigBookingManager:
             cell_value = row_data.get(dj_short, "")
             matrix_count = count_booked_events(cell_value)
 
-            # Count existing bookings in calendar
-            if self.dry_run:
-                print("  [DRY RUN] Skipping calendar check")
-                cal_conflicts = []
-            else:
-                cal_conflicts = check_calendar_conflicts(
-                    booking["date"], booking["dj_initials_bracket"]
-                )
+            # Count existing bookings in calendar (always check, even in dry-run)
+            cal_conflicts = check_calendar_conflicts(
+                booking["date"], booking["dj_initials_bracket"]
+            )
             calendar_count = len(cal_conflicts)
 
             print(f"  Matrix shows: {matrix_count} booking(s) for {dj_short}")
