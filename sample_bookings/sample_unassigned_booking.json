@@ -1,0 +1,21 @@
+{
+  "_comment": "Unassigned booking (TBA) - DJ not yet selected",
+
+  "event_date": "2026-08-15",
+  "assigned_dj": "Unassigned",
+  "secondary_dj": "",
+
+  "client_name": "Williams Wedding",
+
+  "venue_name": "Livermore Valley",
+  "venue_street": "456 Winery Road",
+  "venue_city_state_zip": "Livermore, CA 94550",
+
+  "setup_time": "5:00 PM",
+  "clear_time": "11:00 PM",
+
+  "sound_type": "Standard Speakers",
+  "has_ceremony_sound": false,
+
+  "planner_name": "Elite Planning Co"
+}

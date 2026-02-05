@@ -1,0 +1,22 @@
+{
+  "_comment": "Second booking for same DJ on same day - tests multiple booking dialog",
+  "_note": "First manually add a booking for Paul on 2026-09-12, then use this file to test the multiple booking confirmation dialog",
+
+  "event_date": "2026-09-12",
+  "assigned_dj": "Paul",
+  "secondary_dj": "",
+
+  "client_name": "Chen & Lee Celebration",
+
+  "venue_name": "Hotel Los Gatos",
+  "venue_street": "210 E Main St",
+  "venue_city_state_zip": "Los Gatos, CA 95030",
+
+  "setup_time": "6:00 PM",
+  "clear_time": "11:00 PM",
+
+  "sound_type": "Standard Speakers",
+  "has_ceremony_sound": false,
+
+  "planner_name": ""
+}

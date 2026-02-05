@@ -1,0 +1,21 @@
+{
+  "_comment": "Nestldown minimony (3-hour event) - should use normal calendar timing rules",
+
+  "event_date": "2026-10-05",
+  "assigned_dj": "Woody",
+  "secondary_dj": "",
+
+  "client_name": "Taylor Minimony",
+
+  "venue_name": "Nestldown",
+  "venue_street": "10155 Waterman Gap Road",
+  "venue_city_state_zip": "Los Gatos, CA 95033",
+
+  "setup_time": "4:00 PM",
+  "clear_time": "7:00 PM",
+
+  "sound_type": "Ceremony",
+  "has_ceremony_sound": true,
+
+  "planner_name": ""
+}

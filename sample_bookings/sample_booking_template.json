@@ -1,0 +1,22 @@
+{
+  "_comment": "Sample booking template for testing gig_booking_manager.py with --dry-run",
+  "_usage": "python3 gig_booking_manager.py sample_bookings/sample_booking_template.json --dry-run",
+
+  "event_date": "2026-06-15",
+  "assigned_dj": "Paul",
+  "secondary_dj": "",
+
+  "client_name": "Smith & Johnson Wedding",
+
+  "venue_name": "Nestldown",
+  "venue_street": "10155 Waterman Gap Road",
+  "venue_city_state_zip": "Los Gatos, CA 95033",
+
+  "setup_time": "2:40 PM",
+  "clear_time": "8:40 PM",
+
+  "sound_type": "Ceremony",
+  "has_ceremony_sound": true,
+
+  "planner_name": "Jane Doe Events"
+}
