@@ -63,14 +63,16 @@ on run argv
 	set scriptDir to "/Users/paulburchfield/Documents/projects/dj-availability-checker"
 	set pythonScript to scriptDir & "/gig_booking_manager.py"
 	
-	-- Run the Python script
+	-- Run the Python script in Terminal for visible output
 	try
-		set shellCmd to "cd " & quoted form of scriptDir & " && /Users/paulburchfield/miniconda3/bin/python3 " & quoted form of pythonScript & " " & quoted form of jsonPath & extraFlags & " 2>&1"
-		set scriptOutput to do shell script shellCmd
-		
-		-- Log output (visible in Console.app)
-		log scriptOutput
-		
+		set shellCmd to "cd " & quoted form of scriptDir & " && /Users/paulburchfield/miniconda3/bin/python3 " & quoted form of pythonScript & " " & quoted form of jsonPath & extraFlags
+
+		-- Open Terminal and run the command
+		tell application "Terminal"
+			activate
+			do script shellCmd
+		end tell
+
 	on error errMsg number errNum
 		display dialog "Booking Manager encountered an error:" & return & return & errMsg with title "⚠️ Booking Manager Error" buttons {"OK"} with icon stop
 	end try
