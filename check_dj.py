@@ -4,11 +4,7 @@ Shared module for all years. Year-specific scripts (check_2026.py, check_2027.py
 call main() with the appropriate year string.
 """
 
-# Add path to colorama package
-import sys
-sys.path.append('/Users/paulburchfield/miniconda3/lib/python3.12/site-packages')
-
-# Now import colorama
+# Import colorama for colored terminal output
 try:
     from colorama import init, Fore, Style, Back
     init(autoreset=True)
