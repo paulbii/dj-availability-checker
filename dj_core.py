@@ -1236,8 +1236,12 @@ def get_nearby_bookings_for_dj(dj_name, date_obj, year, service, spreadsheet, sp
         # Check if DJ is booked on this date
         date_bookings = bookings_by_date.get(check_month_day, {})
         if dj_name in date_bookings.get('assigned', {}):
-            # Format as "Day M/D"
+            # Format as "Day M/D" with venue name if available
+            booking_info = date_bookings['assigned'][dj_name]
+            venue = booking_info.get('venue', '') if isinstance(booking_info, dict) else ''
             formatted = f"{calendar.day_name[check_date.weekday()][:3]} {check_date.month}/{check_date.day}"
+            if venue:
+                formatted += f" - {venue}"
             nearby_bookings.append(formatted)
     
     return nearby_bookings
