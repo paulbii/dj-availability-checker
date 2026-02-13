@@ -141,6 +141,24 @@ dj-availability-checker/
 │
 ├── check_2027.py       # Terminal interface for 2027 (same structure)
 ├── dj_app.py           # Streamlit web interface
+│
+├── booking_comparator.py  # Cross-checks 3 booking systems for discrepancies
+│   ├── Reads gig database from text file (raw or reformatted format)
+│   ├── Pulls availability matrix LIVE from Google Sheets
+│   ├── Pulls master calendar LIVE via icalBuddy (macOS)
+│   ├── Compares bookings + backup DJs across all three
+│   └── Saves report to "MM-DD-YYYY - Systems crosscheck.txt"
+│
+├── confirmation_forwarder.py  # Forwards booking confirmations via MailMaven
+│   ├── Reads new-booking JSON from gig database
+│   ├── Creates forward drafts to DJ and/or office
+│   ├── Handles DJ email (consult month, template text)
+│   └── Handles office email (client name, CC addresses)
+│
+├── test_confirmation_forwarder.py  # 62 tests for confirmation_forwarder
+├── sample_bookings/
+│   └── gig_db.txt     # Gig database export for booking_comparator
+│
 ├── your-credentials.json   # Google service account credentials
 ├── .streamlit/
 │   └── secrets.toml    # Credentials for Streamlit (local & cloud)
@@ -151,6 +169,96 @@ dj-availability-checker/
 ```
 
 **Key principle:** All business rules live in `dj_core.py`. The year-specific scripts (`check_2026.py`, etc.) handle UI/display only. If a rule changes, you change it in one place.
+
+---
+
+## Booking Comparator (`booking_comparator.py`)
+
+Cross-checks three booking systems to surface discrepancies that need manual attention.
+
+### Data Sources
+
+| System | Source | How It's Read |
+|---|---|---|
+| Gig Database | Text file export from FileMaker | You paste/export to `sample_bookings/gig_db.txt` |
+| Availability Matrix | Google Sheets | Pulled live via API (uses `dj_core.py`) |
+| Master Calendar | macOS Calendar (Gigs) | Pulled live via `icalBuddy` |
+
+### Usage
+
+```
+python3 booking_comparator.py sample_bookings/gig_db.txt --year 2026
+python3 booking_comparator.py sample_bookings/gig_db.txt --year 2026 --no-calendar
+python3 booking_comparator.py sample_bookings/gig_db.txt --year 2026 --output custom_name.txt
+```
+
+The report automatically saves to `MM-DD-YYYY - Systems crosscheck.txt` and also prints to the console.
+
+### Gig Database Text File Format
+
+The script accepts the raw FileMaker export format:
+
+```
+>	01-03-26 Sat  H	3:00	10:00		--C-A--	Client Name	Venue
+```
+
+Or the reformatted format:
+
+```
+01-03-26 — H — Client Name — Venue
+```
+
+### What It Checks
+
+**Booking discrepancies:** Dates where the DJ lists don't match across systems. Categories include missing from matrix, missing from gig DB, DJ assignment mismatches, and missing from calendar.
+
+**Backup DJ discrepancies:** Compares backup assignments between the matrix and calendar.
+
+### Special Handling
+
+- **RESERVED** entries in the matrix are skipped (held but not booked)
+- **"Hold to DJ"** calendar events are skipped (the calendar equivalent of RESERVED)
+- **Dual-DJ calendar events** like `[WM/HK]` are split into separate entries
+- **BACKUP DJ** calendar events are tracked separately from bookings
+- **TBA/Unassigned** bookings are normalized to "TBA" across all systems
+- DJ codes: S=Stefano, SD=Stephanie, P=Paul, H=Henry, W=Woody, F=Felipe, FS=Felipe
+
+### Prerequisites
+
+- `icalBuddy` installed (`brew install ical-buddy`) — only needed for calendar comparison
+- `your-credentials.json` for Google Sheets API access
+- Calendar named "Gigs" in macOS Calendar with events prefixed by DJ initials in brackets (e.g., `[PB] Client Name`)
+
+---
+
+## Confirmation Forwarder (`confirmation_forwarder.py`)
+
+Automates forwarding booking confirmation emails to DJs and/or the office via MailMaven (macOS mail client).
+
+### Usage
+
+Run from the dj-availability-checker folder after selecting a confirmation email in MailMaven:
+
+```
+python3 confirmation_forwarder.py
+```
+
+The script reads the booking JSON from the gig database, determines who to email, builds the appropriate template text, and creates forward drafts in MailMaven via AppleScript.
+
+### What It Does
+
+1. Reads the new-booking JSON (from FileMaker webhook or file)
+2. Determines the assigned DJ and whether to send a DJ email, office email, or both
+3. For the **DJ email**: includes consult month reminder, template greeting, and relevant booking details
+4. For the **office email**: includes client name and CCs Henry and Woody when applicable
+5. Creates forward drafts in MailMaven using AppleScript (Tab navigation to body, clipboard paste for template text)
+
+### Special Handling
+
+- Skips DJ email when DJ is "Unknown" or "Unassigned"
+- Uses "next [Month]" phrasing when the consult month is in a future year
+- Always includes client name in office email (handles double-booking edge case)
+- CC addresses are entered via keystroke + Enter (not set value) to ensure they stick
 
 ---
 
