@@ -485,10 +485,16 @@ def get_bulk_availability_data(year, service, spreadsheet, spreadsheet_id, start
                 value_lower = value_str.lower()
                 is_bold = bold_status.get(dj_name, False)
                 
-                if value_lower == "booked":
+                # Handle compound statuses like "BOOKED, BACKUP"
+                statuses = [s.strip() for s in value_lower.split(',')]
+
+                if 'booked' in statuses:
                     booked_djs.append(dj_name)
-                elif value_lower == "backup":
+                if 'backup' in statuses:
                     backup_assigned.append(dj_name)
+
+                if 'booked' in statuses or 'backup' in statuses:
+                    pass  # Already handled above
                 elif value_lower == "reserved":
                     # Stephanie can have RESERVED status
                     booked_djs.append(f"{dj_name} (RESERVED)")

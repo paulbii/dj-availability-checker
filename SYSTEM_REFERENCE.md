@@ -156,8 +156,7 @@ dj-availability-checker/
 │   └── Handles office email (client name, CC addresses)
 │
 ├── test_confirmation_forwarder.py  # 62 tests for confirmation_forwarder
-├── sample_bookings/
-│   └── gig_db.txt     # Gig database export for booking_comparator
+├── gig_db.txt             # Gig database export for booking_comparator
 │
 ├── your-credentials.json   # Google service account credentials
 ├── .streamlit/
@@ -180,16 +179,16 @@ Cross-checks three booking systems to surface discrepancies that need manual att
 
 | System | Source | How It's Read |
 |---|---|---|
-| Gig Database | Text file export from FileMaker | You paste/export to `sample_bookings/gig_db.txt` |
+| Gig Database | Text file export from FileMaker | You paste/export to `gig_db.txt` |
 | Availability Matrix | Google Sheets | Pulled live via API (uses `dj_core.py`) |
 | Master Calendar | macOS Calendar (Gigs) | Pulled live via `icalBuddy` |
 
 ### Usage
 
 ```
-python3 booking_comparator.py sample_bookings/gig_db.txt --year 2026
-python3 booking_comparator.py sample_bookings/gig_db.txt --year 2026 --no-calendar
-python3 booking_comparator.py sample_bookings/gig_db.txt --year 2026 --output custom_name.txt
+python3 booking_comparator.py --year 2026
+python3 booking_comparator.py --year 2026 --no-calendar
+python3 booking_comparator.py --year 2026 --output custom_name.txt
 ```
 
 The report automatically saves to `MM-DD-YYYY - Systems crosscheck.txt` and also prints to the console.

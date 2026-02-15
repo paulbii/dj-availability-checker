@@ -67,7 +67,12 @@ def parse_gig_db(filepath, year):
     }
 
     with open(filepath, 'r') as f:
-        first_line = f.readline().strip()
+        # Skip blank lines to find first real line for format detection
+        first_line = ''
+        for probe_line in f:
+            first_line = probe_line.strip()
+            if first_line:
+                break
         f.seek(0)
 
         is_raw_format = first_line.startswith('>')
@@ -530,9 +535,10 @@ def compare_systems(gig_db, avail_matrix, master_cal=None,
 def main():
     parser = argparse.ArgumentParser(
         description="Compare DJ booking systems for discrepancies",
-        epilog="Example: python3 booking_comparator.py gig-db.txt --year 2026",
+        epilog="Example: python3 booking_comparator.py --year 2026",
     )
-    parser.add_argument("gig_db_file", help="Path to gig database text file")
+    parser.add_argument("gig_db_file", nargs="?", default="gig_db.txt",
+                        help="Path to gig database text file (default: gig_db.txt)")
     parser.add_argument("--year", required=True, help="Year to compare (e.g., 2026)")
     parser.add_argument("--no-calendar", action="store_true",
                         help="Skip master calendar comparison")
