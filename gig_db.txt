@@ -1,3 +1,8 @@
+
+>	10-03-27 Sun  UP	2:00	10:00		--C-A--	Emlyn Stults and Spencer Johnson	Kohl Mansion (FOG OK)
+>	06-25-27 Fri  UP	3:40	9:40		0---A--	Madeline Armacost and Alan Chun	Nestldown (NO FOG, NO TAPE)
+>	05-23-27 Sun  UP	3:30	9:00		--C-A-U	Miriam Lapis and Justin Gerard	Kohl Mansion (FOG OK)
+>	04-24-27 Sat  UP	4:30	9:30		-------	Katrena Thompson and Julian Sally	Hakone Gardens
 >	11-14-26 Sat  H	2:40	8:40		0------	Abbey Ayala and Andrew Kneppers	Nestldown (NO FOG, NO TAPE)
 >	11-07-26 Sat  P	2:40	8:40		0---A--	Cassie Zanone and Connor Trafton	Nestldown (NO FOG, NO TAPE)
 >	10-22-26 Thu  P	3:00	10:00		--C-A--	Kyleigh Boatwright and Andrew Mercer	Waterfall Lodge (was Stones and Flowers)
@@ -75,6 +80,7 @@
 >	05-29-26 Fri  H	7:15	10:15		-------	NDV 8th Grade Graduation Party	NDV Church Hall (enter at Chatham Alley)
 >	05-29-26 Fri  W	4:00	9:00		--C----	Karn Wattayagorn and Brad Reiter	Allied Arts Guild (ceremony: instrumentals only)
 >	05-26-26 Tue  H	3:00	6:00		-------	Valley Christian 8th Grade Graduation Party	Coyote Ranch
+>	05-24-26 Sun  H	4:00	9:30		--C-A--	Kayley Franklin and Tristan Felberg	Farm Day Family Winery
 >	05-23-26 Sat  H	5:00	9:30		--C-A--	Jessica Greenbaum and Cole Musselman	Hakone Gardens
 >	05-23-26 Sat  S	3:40	9:40		0------	Erika MacDonald and Cuyler Crandall	Nestldown (NO FOG, NO TAPE)
 >	05-23-26 Sat  P	3:30	10:00		-------	Jennifer Vuong and Allen Lu	Villa Montalvo (NO FOG INSIDE)
@@ -102,7 +108,7 @@
 >	04-11-26 Sat  H	5:00	11:00		0Q-----	Millbrae Education Foundation Gala	Millbrae Recreation Center (NO FOG; PAINTERS TAPE ONLY)
 >	04-11-26 Sat  P	3:30	11:00		--C-A--	Lauren Ulsh and Ani Tarimala	Kohl Mansion (FOG OK)
 >	04-10-26 Fri  W	2:40	8:40		0------	Alekhya Kodali and Sathwik Kanukuntla	Nestldown (NO FOG, NO TAPE)
->	03-29-26 Sun  H	4:30	9:30	1	--C-A--	Lase Bayudan and Jonathan Lian	Hakone Gardens
+>	03-29-26 Sun  H	4:30	9:30	1	--C-A--	*Lase Bayudan and Jonathan Lian	Hakone Gardens
 >	03-28-26 Sat  P	5:00	11:00	6	-------	Bird Family Seder	CIA at Copia
 >	03-28-26 Sat  H	5:00	9:30	1	--C-A--	Whitney Pace and Jon Sakuma	⬆ Hakone Gardens
 >	03-27-26 Fri  W	4:00	10:00	3	--C----	Ali Nowakowski and Kevin Blakley	Mountain Terrace (NO OUTDOOR MUSIC)
@@ -125,3 +131,11 @@
 >	01-23-26 Fri  W	5:00	10:00	3	-------	Alumis Holiday Event	LaMar Cocina Peruana
 >	01-03-26 Sat  H	4:00	9:00	1	--C----	Kristy's 50th Birthday Party	Allied Arts Guild (ceremony: instrumentals only)
 >	01-03-26 Sat  P	3:00	9:00	6	--C----	Christina Monaco and David Cade Burton	Mountain Terrace (NO OUTDOOR MUSIC)
+>	12-27-25 Sat  P	4:00	10:00	6	--C-A-U	Carlos Villalobos and Matthew Michelini	Kohl Mansion (FOG OK)
+>	12-19-25 Fri  W	1:00	6:00	8	Xx-3A-U	Cotchett Pitre and McCarthy Holiday Party	Kohl Mansion (FOG OK)
+>	12-17-25 Wed  W	6:00	9:00	3	-------	Freenome Holiday Party	Domenico Winery
+>	12-12-25 Fri  S	6:30	10:30	4	-------	Olander Holiday Party	Villa Ragusa
+>	12-07-25 Sun  P	6:00	10:00	6	-------	Jumpstart MD	Domenico Winery
+>	12-06-25 Sat  P	6:30	10:30	4	0s--A--	The Great Gatsby Themed Holiday Party	Legion of Honor (NO FOG)
+>	12-06-25 Sat  F	5:00	9:00	6	--C----	Amy Ding and John Luo	Mountain Terrace (NO OUTDOOR MUSIC)
+>	12-06-25 Sat  H	4:00	10:00	1	--C----	Jenny Yu and John Cho	Harborview Restaurant (was Crystal Jade Restaurant)
