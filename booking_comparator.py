@@ -456,20 +456,6 @@ def compare_systems(gig_db, avail_matrix, master_cal=None,
             write(f"  {issue['date']:>8}  Matrix: {', '.join(issue['avail_matrix'])}")
         write()
 
-    # Report: DJ Mismatches (the interesting ones)
-    if dj_mismatches:
-        write(f"DJ ASSIGNMENT MISMATCHES ({len(dj_mismatches)} dates)")
-        write("-" * 70)
-        write("These dates have different DJs across systems:")
-        write()
-        for issue in dj_mismatches:
-            write(f"  {issue['date']:>8}")
-            write(f"           Gig DB:  {', '.join(issue['gig_db']) if issue['gig_db'] else '[MISSING]'}")
-            write(f"           Matrix:  {', '.join(issue['avail_matrix']) if issue['avail_matrix'] else '[MISSING]'}")
-            if has_calendar and 'master_cal' in issue:
-                write(f"           Cal:     {', '.join(issue['master_cal']) if issue['master_cal'] else '[MISSING]'}")
-            write()
-
     # Report: Missing from Calendar
     if has_calendar and missing_from_calendar:
         already_reported = set(i['date'] for i in dj_mismatches)
@@ -481,6 +467,20 @@ def compare_systems(gig_db, avail_matrix, master_cal=None,
             write()
             for issue in cal_only:
                 write(f"  {issue['date']:>8}  Gig DB: {', '.join(issue['gig_db'])}")
+            write()
+
+    # Report: DJ Mismatches (the investigation items)
+    if dj_mismatches:
+        write(f"DJ ASSIGNMENT MISMATCHES ({len(dj_mismatches)} dates)")
+        write("-" * 70)
+        write("These dates have different DJs across systems:")
+        write()
+        for issue in dj_mismatches:
+            write(f"  {issue['date']:>8}")
+            write(f"           Gig DB:  {', '.join(issue['gig_db']) if issue['gig_db'] else '[MISSING]'}")
+            write(f"           Matrix:  {', '.join(issue['avail_matrix']) if issue['avail_matrix'] else '[MISSING]'}")
+            if has_calendar and 'master_cal' in issue:
+                write(f"           Cal:     {', '.join(issue['master_cal']) if issue['master_cal'] else '[MISSING]'}")
             write()
 
     # =====================================================================
