@@ -4,27 +4,32 @@ Booking System Comparator
 ==========================
 Cross-checks up to three booking systems to find discrepancies:
 
-  1. Gig Database    — you provide a text file (raw or reformatted)
+  1. Gig Database    — pulled LIVE from bigfundj.com JSON endpoint
   2. Avail Matrix    — pulled LIVE from Google Sheets
   3. Master Calendar — pulled LIVE via icalBuddy (macOS)
 
 Usage:
-  python3 booking_comparator.py gig-db.txt --year 2026
-  python3 booking_comparator.py gig-db.txt --year 2026 --no-calendar
-  python3 booking_comparator.py gig-db.txt --year 2026 --output report.txt
+  python3 booking_comparator.py --year 2026
+  python3 booking_comparator.py --year 2026 --no-calendar
+  python3 booking_comparator.py --year 2026 --output report.txt
+  python3 booking_comparator.py gig-db.txt --year 2026   (text file fallback)
 
 The script:
-  - Reads the gig database from your text file
+  - Fetches the gig database live from the JSON endpoint (falls back to text file)
   - Pulls the availability matrix directly from Google Sheets
   - Pulls the master calendar directly via icalBuddy
   - Compares all three and reports discrepancies
+  - Auto-saves report to "MM-DD-YYYY - Systems crosscheck.txt"
 """
 
 import argparse
+import json
 import os
 import re
 import subprocess
 import sys
+import urllib.request
+import urllib.error
 from collections import defaultdict
 from datetime import datetime, timedelta
 
@@ -35,9 +40,84 @@ from dj_core import (
     get_bulk_availability_data,
 )
 
+# Base URL for gig database JSON endpoint
+GIG_DB_JSON_URL = "https://database.bigfundj.com/bigfunadmin/listviewjson.php"
+
+# Map full DJ names from JSON endpoint to internal short names
+DJ_NAME_MAP = {
+    'Paul Burchfield': 'Paul',
+    'Henry S. Kim': 'Henry',
+    'Woody Miraglia': 'Woody',
+    'Stefano Bortolin': 'Stefano',
+    'Stephanie de Jesus': 'Stephanie',
+    'Felipe Santiago': 'Felipe',
+}
+
 
 # =============================================================================
-# GIG DATABASE PARSER (from text file)
+# GIG DATABASE (live from JSON endpoint)
+# =============================================================================
+
+def fetch_gig_db_json(year):
+    """
+    Fetch gig database directly from the JSON endpoint.
+    URL: listviewjson.php?year=YYYY
+
+    Returns: dict of { "M/D": ["DJ1", "DJ2", ...] }
+    """
+    events = defaultdict(list)
+    url = f"{GIG_DB_JSON_URL}?year={year}"
+
+    print(f"  Fetching from {url}...")
+    try:
+        req = urllib.request.Request(url, headers={
+            'User-Agent': 'BigFunDJ-BookingComparator/1.0',
+        })
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode('utf-8'))
+    except urllib.error.URLError as e:
+        print(f"  ERROR: Could not reach gig database: {e}")
+        return None
+    except json.JSONDecodeError as e:
+        print(f"  ERROR: Invalid JSON response: {e}")
+        return None
+
+    for record in data:
+        date_str = record.get('event_date', '')
+        dj_full = record.get('assigned_dj', '')
+
+        if not date_str or not dj_full:
+            continue
+
+        # Skip canceled events (if status field is present)
+        status = record.get('status', '').lower()
+        if status in ('canceled', 'cancelled'):
+            continue
+
+        # Parse date: "2026-01-03" → "1/3"
+        try:
+            date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+            date_key = f"{date_obj.month}/{date_obj.day}"
+        except ValueError:
+            continue
+
+        # Map DJ name
+        if dj_full.lower() in ('unassigned', 'unknown', ''):
+            dj_name = 'TBA'
+        else:
+            dj_name = DJ_NAME_MAP.get(dj_full, dj_full)
+
+        events[date_key].append(dj_name)
+
+    # Sort DJs for each date
+    for date_key in events:
+        events[date_key] = sorted(events[date_key])
+
+    return events
+
+
+# =============================================================================
+# GIG DATABASE PARSER (from text file — fallback)
 # =============================================================================
 
 def parse_gig_db(filepath, year):
@@ -537,8 +617,8 @@ def main():
         description="Compare DJ booking systems for discrepancies",
         epilog="Example: python3 booking_comparator.py --year 2026",
     )
-    parser.add_argument("gig_db_file", nargs="?", default="gig_db.txt",
-                        help="Path to gig database text file (default: gig_db.txt)")
+    parser.add_argument("gig_db_file", nargs="?", default=None,
+                        help="Path to gig database text file (default: fetch live from endpoint)")
     parser.add_argument("--year", required=True, help="Year to compare (e.g., 2026)")
     parser.add_argument("--no-calendar", action="store_true",
                         help="Skip master calendar comparison")
@@ -546,16 +626,29 @@ def main():
 
     args = parser.parse_args()
 
-    if not os.path.exists(args.gig_db_file):
-        print(f"Error: File not found: {args.gig_db_file}")
-        sys.exit(1)
-
     print(f"\nBOOKING COMPARATOR — {args.year}")
     print("=" * 50)
 
-    # 1. Parse gig database from file
-    print(f"\n[1/3] Reading gig database from {args.gig_db_file}...")
-    gig_db = parse_gig_db(args.gig_db_file, args.year)
+    # 1. Fetch gig database — live endpoint by default, text file as fallback
+    if args.gig_db_file:
+        # Manual text file specified
+        if not os.path.exists(args.gig_db_file):
+            print(f"Error: File not found: {args.gig_db_file}")
+            sys.exit(1)
+        print(f"\n[1/3] Reading gig database from {args.gig_db_file}...")
+        gig_db = parse_gig_db(args.gig_db_file, args.year)
+    else:
+        # Fetch live from JSON endpoint
+        print(f"\n[1/3] Fetching gig database from bigfundj.com...")
+        gig_db = fetch_gig_db_json(args.year)
+        if gig_db is None:
+            print("  Falling back to local gig_db.txt...")
+            if os.path.exists("gig_db.txt"):
+                gig_db = parse_gig_db("gig_db.txt", args.year)
+            else:
+                print("  Error: No gig_db.txt found either. Cannot continue.")
+                sys.exit(1)
+
     gig_count = sum(len(v) for v in gig_db.values())
     print(f"  Found {gig_count} bookings on {len(gig_db)} dates")
 

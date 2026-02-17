@@ -143,7 +143,8 @@ dj-availability-checker/
 ├── dj_app.py           # Streamlit web interface
 │
 ├── booking_comparator.py  # Cross-checks 3 booking systems for discrepancies
-│   ├── Reads gig database from text file (raw or reformatted format)
+│   ├── Fetches gig database LIVE from bigfundj.com JSON endpoint
+│   ├── Falls back to local gig_db.txt if endpoint unreachable
 │   ├── Pulls availability matrix LIVE from Google Sheets
 │   ├── Pulls master calendar LIVE via icalBuddy (macOS)
 │   ├── Compares bookings + backup DJs across all three
@@ -179,7 +180,7 @@ Cross-checks three booking systems to surface discrepancies that need manual att
 
 | System | Source | How It's Read |
 |---|---|---|
-| Gig Database | Text file export from FileMaker | You paste/export to `gig_db.txt` |
+| Gig Database | bigfundj.com JSON endpoint | Fetched live (falls back to `gig_db.txt`) |
 | Availability Matrix | Google Sheets | Pulled live via API (uses `dj_core.py`) |
 | Master Calendar | macOS Calendar (Gigs) | Pulled live via `icalBuddy` |
 
