@@ -26,7 +26,9 @@ import sys
 import os
 import subprocess
 import argparse
+import webbrowser
 from datetime import datetime, timedelta
+from urllib.parse import quote
 import re
 import calendar as cal_module
 
@@ -64,6 +66,15 @@ from dj_core import (
 # =============================================================================
 
 CALENDAR_NAME = "Gigs"
+
+# Google Form for booking log
+BOOKING_LOG_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLScNrxG2zvtJ-3BAh72xUkN_UinzRC66n1j3zACGqsC_62Do7w/viewform"
+FORM_FIELDS = {
+    "event_date": "entry.537274969",
+    "decision_date": "entry.1777773709",
+    "venue": "entry.2004165625",
+    "status": "entry.918038989",
+}
 
 # Default credentials path — override with --credentials flag
 DEFAULT_CREDENTIALS_PATH = os.path.join(
@@ -918,6 +929,32 @@ def show_notification(title, message):
 
 
 # =============================================================================
+# BOOKING LOG (Google Form pre-fill)
+# =============================================================================
+
+def open_booking_log_form(booking):
+    """
+    Open the Google Form for booking log with known fields pre-filled.
+    Pre-fills: event date, decision date (today), venue, status (Booked).
+    User completes the remaining fields manually.
+    """
+    event_date = booking["date"].strftime("%-m-%-d-%y")    # e.g., "10-24-26"
+    decision_date = datetime.now().strftime("%-m-%-d-%y")   # today
+    venue = booking["venue_name"]
+
+    params = (
+        f"?usp=pp_url"
+        f"&{FORM_FIELDS['event_date']}={quote(event_date)}"
+        f"&{FORM_FIELDS['decision_date']}={quote(decision_date)}"
+        f"&{FORM_FIELDS['venue']}={quote(venue)}"
+        f"&{FORM_FIELDS['status']}={quote('Booked')}"
+    )
+    url = BOOKING_LOG_FORM_URL + params
+    webbrowser.open(url)
+    return url
+
+
+# =============================================================================
 # MAIN ORCHESTRATOR
 # =============================================================================
 
@@ -1264,6 +1301,13 @@ class GigBookingManager:
         print("=" * 60)
         for action in self.actions:
             print(f"  • {action}")
+        print()
+
+        # Open pre-filled booking log form (safe in dry-run — nothing submits until user clicks)
+        print("— Opening booking log form...")
+        form_url = open_booking_log_form(booking)
+        self.log("Booking log: form opened in browser")
+        print(f"  ✓ Pre-filled form opened — complete remaining fields")
         print()
 
         # Show notification (production only)
