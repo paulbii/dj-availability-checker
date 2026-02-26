@@ -329,13 +329,17 @@ def can_backup(dj_name, cell_value, is_bold, date_obj, year):
     value = (cell_value or "").strip().upper()
     weekend = is_weekend(date_obj)
 
+    # Split compound values (e.g., "DAD, BACKUP") for checking
+    statuses = [s.strip().lower() for s in value.split(",")]
+
     # Guard: reject unknown cell values
-    if value and value.lower() not in KNOWN_CELL_VALUES:
-        print(f'  ⚠️  Unknown matrix value for {dj_name}: "{value}" (in can_backup) — treating as unavailable')
-        return False, None
+    for s in statuses:
+        if s and s not in KNOWN_CELL_VALUES:
+            print(f'  ⚠️  Unknown matrix value for {dj_name}: "{value}" (in can_backup) — treating as unavailable')
+            return False, None
 
     # Universal: already booked, already backup, or maxed → no
-    if value in ("BOOKED", "BACKUP", "MAXED", "RESERVED"):
+    if any(s in ("booked", "backup", "maxed", "reserved") for s in statuses):
         return False, None
 
     # STANFORD and LAST: DJ is available for booking and backup
@@ -452,7 +456,8 @@ def check_existing_backup(row_data):
     """Check if any DJ is already assigned as backup. Returns DJ name or None."""
     for dj in ["Henry", "Woody", "Paul", "Stefano", "Felipe", "Stephanie"]:
         val = (row_data.get(dj, "") or "").strip().upper()
-        if val == "BACKUP":
+        statuses = [s.strip() for s in val.split(",")]
+        if "BACKUP" in statuses:
             return dj
     return None
 
@@ -680,10 +685,17 @@ def check_calendar_conflicts(date_obj, initials_bracket):
              f"eventsFrom:{date_str}", f"to:{date_str}"],
             capture_output=True, text=True, timeout=10,
         )
+        # Non-booking event keywords — these contain DJ initials but aren't real booking conflicts
+        non_booking_keywords = ["DAD-DUTY", "BACKUP DJ", "HOLD"]
+
         conflicts = []
         for line in result.stdout.strip().split("\n"):
             line = line.strip()
             if line and initials_bracket in line:
+                # Skip non-booking events (DAD-DUTY, BACKUP DJ, etc.)
+                line_upper = line.upper()
+                if any(kw in line_upper for kw in non_booking_keywords):
+                    continue
                 conflicts.append(line)
         return conflicts
     except FileNotFoundError:
@@ -1238,14 +1250,19 @@ class GigBookingManager:
                         show_warning_dialog(msg)
                     backup_dj = None
                 else:
-                    # Write backup to matrix
+                    # Write backup to matrix, preserving existing cell value (e.g., "DAD" → "DAD, BACKUP")
                     backup_col = col_map[backup_dj]
-                    if self.dry_run:
-                        print(f"  [DRY RUN] Would write 'BACKUP' to row {row_num}, col {backup_col} in {year} sheet")
+                    current_backup_val = (row_data.get(backup_dj, "") or "").strip()
+                    if current_backup_val and current_backup_val.upper() not in ("", "BACKUP"):
+                        new_backup_val = f"{current_backup_val}, BACKUP"
                     else:
-                        self.sheets.write_cell(row_num, backup_col, "BACKUP", year)
-                    self.log(f"Matrix: {backup_dj} → BACKUP")
-                    print(f"  ✓ {backup_dj} → BACKUP written to matrix")
+                        new_backup_val = "BACKUP"
+                    if self.dry_run:
+                        print(f"  [DRY RUN] Would write '{new_backup_val}' to row {row_num}, col {backup_col} in {year} sheet")
+                    else:
+                        self.sheets.write_cell(row_num, backup_col, new_backup_val, year)
+                    self.log(f"Matrix: {backup_dj} → '{new_backup_val}'")
+                    print(f"  ✓ {backup_dj} → '{new_backup_val}' written to matrix")
             elif not existing_backup and not self.dry_run:
                 self.log("Backup: skipped")
         else:
