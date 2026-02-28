@@ -804,6 +804,39 @@ def create_allday_backup_event(date_obj, dj_name, test_mode=False):
     return title
 
 
+def delete_hold_calendar_event(date_obj, initials_bracket):
+    """
+    Delete a 'Hold to DJ' calendar event for a DJ on a given date.
+    Called when converting a RESERVED status to BOOKED.
+    Returns True if an event was deleted, False otherwise.
+    """
+    date_str = date_obj.strftime("%B %d, %Y")  # "September 26, 2026"
+
+    script = f'''
+    tell application "Calendar"
+        tell calendar "{CALENDAR_NAME}"
+            set holdEvents to (every event whose start date >= date "{date_str} 12:00:00 AM" and start date < date "{date_str} 11:59:59 PM" and summary contains "Hold to DJ" and summary contains "{initials_bracket}")
+            set deletedCount to count of holdEvents
+            repeat with anEvent in holdEvents
+                delete anEvent
+            end repeat
+            return deletedCount
+        end tell
+    end tell
+    '''
+
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True, text=True, timeout=30,
+        )
+        count = result.stdout.strip()
+        return count != "0" and count != ""
+    except (subprocess.TimeoutExpired, Exception) as e:
+        print(f"  WARNING: Could not delete hold event: {e}")
+        return False
+
+
 # =============================================================================
 # DIALOG OPERATIONS (via AppleScript)
 # =============================================================================
@@ -1080,6 +1113,7 @@ class GigBookingManager:
 
             # Count existing bookings in matrix
             cell_value = row_data.get(dj_short, "")
+            is_reserved = cell_value.strip().upper() == "RESERVED"
             matrix_count = count_booked_events(cell_value)
 
             # Count existing bookings in calendar (always check, even in dry-run)
@@ -1089,6 +1123,8 @@ class GigBookingManager:
             calendar_count = len(cal_conflicts)
 
             print(f"  Matrix shows: {matrix_count} booking(s) for {dj_short}")
+            if is_reserved:
+                print(f"  Matrix cell is RESERVED — will convert to BOOKED")
             print(f"  Calendar shows: {calendar_count} event(s) for {booking['dj_initials_bracket']}")
 
             # Validate matrix and calendar agree
@@ -1122,6 +1158,8 @@ class GigBookingManager:
                         print(f"  ⚠️  CANCELLED: {msg}")
                         self.log(f"HALTED: {msg}")
                         return False
+            elif is_reserved:
+                print(f"  ✓ {dj_short} is RESERVED — converting to BOOKED")
             else:
                 print(f"  ✓ {dj_short}'s cell is blank — OK to write")
         else:
@@ -1150,13 +1188,30 @@ class GigBookingManager:
                 self.log(f"Matrix: {dj_short} → '{new_value}'")
                 row_data[dj_short] = new_value  # Update local copy
             else:
-                # First booking - write BOOKED
+                # First booking - write BOOKED (overwrites RESERVED if present)
                 if self.dry_run:
                     print(f"  [DRY RUN] Would write 'BOOKED' to row {row_num}, col {col_num} in {year} sheet")
                 else:
                     self.sheets.write_cell(row_num, col_num, "BOOKED", year)
-                self.log(f"Matrix: {dj_short} → BOOKED")
+                if is_reserved:
+                    self.log(f"Matrix: {dj_short} RESERVED → BOOKED")
+                else:
+                    self.log(f"Matrix: {dj_short} → BOOKED")
                 row_data[dj_short] = "BOOKED"  # Update local copy
+
+                # If converting from RESERVED, remove the Hold to DJ calendar event
+                if is_reserved:
+                    if self.dry_run:
+                        print(f"  [DRY RUN] Would delete Hold to DJ event for {booking['dj_initials_bracket']}")
+                    else:
+                        deleted = delete_hold_calendar_event(
+                            booking["date"], booking["dj_initials_bracket"]
+                        )
+                        if deleted:
+                            self.log(f"Calendar: deleted Hold to DJ event for {dj_short}")
+                            print(f"  ✓ Deleted Hold to DJ calendar event")
+                        else:
+                            print(f"  ℹ️  No Hold to DJ event found to delete")
         else:
             tba_col = col_map["TBA"]
             current_tba = row_data.get("TBA", "")
