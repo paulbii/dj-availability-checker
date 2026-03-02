@@ -250,7 +250,7 @@ class BackupAssigner:
                 if b['venue']:
                     part += f" @ {b['venue']}"
                 context_parts.append(part)
-            booking_context = " | ".join(context_parts)
+            booking_context = "\\n".join(context_parts)
 
         # Show backup dialog
         if self.dry_run:
