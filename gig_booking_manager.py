@@ -1305,10 +1305,12 @@ class GigBookingManager:
                         show_warning_dialog(msg)
                     backup_dj = None
                 else:
-                    # Write backup to matrix, preserving existing cell value (e.g., "DAD" → "DAD, BACKUP")
+                    # Write backup to matrix, preserving meaningful statuses (e.g., "DAD" → "DAD, BACKUP")
+                    # but replacing default availability markers (OUT, OK, STANFORD, LAST, OK TO BACKUP)
                     backup_col = col_map[backup_dj]
                     current_backup_val = (row_data.get(backup_dj, "") or "").strip()
-                    if current_backup_val and current_backup_val.upper() not in ("", "BACKUP"):
+                    replace_values = {"", "OUT", "OK", "DAD", "STANFORD", "LAST", "OK TO BACKUP", "BACKUP"}
+                    if current_backup_val and current_backup_val.upper() not in replace_values:
                         new_backup_val = f"{current_backup_val}, BACKUP"
                     else:
                         new_backup_val = "BACKUP"
