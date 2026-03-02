@@ -936,16 +936,18 @@ def show_backup_dialog(date_display, spots_remaining, candidates, existing_backu
     items.append("Skip")
 
     # AppleScript choose from list
+    # Cancel button (built-in) = stop entire script
+    # "Skip" list option = skip this date, continue to next
     items_str = ", ".join(f'"{item}"' for item in items)
     context_line = f"\\n{booking_context}\\n" if booking_context else ""
-    prompt = f"{date_display} — {spots_remaining} spot(s) remaining{context_line}\\nNo backup assigned\\n\\nSelect backup DJ:"
+    prompt = f"{date_display} — {spots_remaining} spot(s) remaining{context_line}\\nNo backup assigned\\n\\nSelect backup DJ (Cancel = stop script):"
     prompt_esc = prompt.replace('"', '\\"')
 
     script = f'''
     set candidates to {{{items_str}}}
     set userChoice to choose from list candidates with prompt "{prompt_esc}" with title "Assign Backup" default items {{"Skip"}}
     if userChoice is false then
-        return "SKIP"
+        return "CANCEL"
     else
         return item 1 of userChoice
     end if
@@ -956,7 +958,10 @@ def show_backup_dialog(date_display, spots_remaining, candidates, existing_backu
     )
     choice = result.stdout.strip()
 
-    if not choice or choice == "SKIP" or choice == "Skip" or choice == "false":
+    if not choice or choice == "CANCEL" or choice == "false":
+        return "STOP"
+
+    if choice == "Skip":
         return None
 
     # Extract DJ name from the choice string (format: "Woody (unpaid)")

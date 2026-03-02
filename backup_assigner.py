@@ -261,6 +261,10 @@ class BackupAssigner:
 
         backup_dj = show_backup_dialog(date_display, spots, candidates, None, booking_context)
 
+        if backup_dj == "STOP":
+            print("  Stopped by user.")
+            return "STOP"
+
         if not backup_dj:
             print("  Skipped")
             self.stats["skipped"] += 1
@@ -343,8 +347,11 @@ class BackupAssigner:
 
         # Process each date
         for i, date_info in enumerate(candidates, 1):
-            self.process_date(date_info, i, len(candidates))
+            result = self.process_date(date_info, i, len(candidates))
             print()
+            if result == "STOP":
+                print("  Stopped early by user.")
+                break
 
         # Summary
         print(f"{'=' * 60}")
