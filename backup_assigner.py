@@ -18,8 +18,10 @@ The script:
 """
 
 import argparse
+import json
 import os
 import sys
+import urllib.request
 from datetime import datetime
 
 # Import shared DJ data from dj_core
@@ -32,6 +34,19 @@ from dj_core import (
     init_google_sheets_from_file,
     get_bulk_availability_data,
 )
+
+# Gig database JSON endpoint (same as booking_comparator)
+GIG_DB_JSON_URL = "https://database.bigfundj.com/bigfunadmin/listviewjson.php"
+
+# Map full DJ names from gig DB to short names used in our system
+DJ_NAME_MAP = {
+    "Henry Newmann": "Henry",
+    "Woody Ducharme": "Woody",
+    "Paul Burchfield": "Paul",
+    "Stefano Pace": "Stefano",
+    "Felipe da Silva": "Felipe",
+    "Stephanie de Jesus": "Stephanie",
+}
 
 # Import booking manager functions (reuse existing logic)
 from gig_booking_manager import (
@@ -69,8 +84,56 @@ class BackupAssigner:
         """Log an action for the summary."""
         self.actions.append(action)
 
+    def fetch_booking_details(self):
+        """
+        Fetch venue/client info from gig database JSON endpoint.
+        Returns dict: { "M/D": [{"dj": "Henry", "venue": "Kohl Mansion", "client": "Smith"}, ...] }
+        """
+        url = f"{GIG_DB_JSON_URL}?year={self.year}"
+        try:
+            req = urllib.request.Request(url, headers={
+                'User-Agent': 'BigFunDJ-BackupAssigner/1.0',
+            })
+            with urllib.request.urlopen(req, timeout=30) as response:
+                data = json.loads(response.read().decode('utf-8'))
+        except (urllib.error.URLError, json.JSONDecodeError) as e:
+            print(f"  WARNING: Could not fetch booking details: {e}")
+            return {}
+
+        bookings = {}
+        for record in data:
+            date_str = record.get('event_date', '')
+            dj_full = record.get('assigned_dj', '')
+            venue = record.get('venue_name', '')
+            client = record.get('client_name', '')
+            status = record.get('status', '').lower()
+
+            if not date_str or status in ('canceled', 'cancelled'):
+                continue
+
+            try:
+                date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                date_key = f"{date_obj.month}/{date_obj.day}"
+            except ValueError:
+                continue
+
+            if dj_full.lower() in ('unassigned', 'unknown', ''):
+                dj_name = 'TBA'
+            else:
+                dj_name = DJ_NAME_MAP.get(dj_full, dj_full)
+
+            if date_key not in bookings:
+                bookings[date_key] = []
+            bookings[date_key].append({
+                'dj': dj_name,
+                'venue': venue,
+                'client': client,
+            })
+
+        return bookings
+
     def init(self):
-        """Initialize Google Sheets connections."""
+        """Initialize Google Sheets connections and fetch booking details."""
         print("  Connecting to Google Sheets...")
         self.sheets.init()
 
@@ -81,6 +144,14 @@ class BackupAssigner:
         self.service, self.spreadsheet, self.spreadsheet_id, self.client = \
             init_google_sheets_from_file(creds_file)
         print("  Connected.")
+
+        # Fetch booking details (DJ + venue) from gig database
+        print("  Fetching booking details from gig database...")
+        self.booking_details = self.fetch_booking_details()
+        if self.booking_details:
+            print(f"  Found booking details for {len(self.booking_details)} dates.")
+        else:
+            print("  No booking details available (venue info won't be shown).")
 
     def fetch_candidate_dates(self):
         """Fetch future dates with bookings but no backup assigned."""
@@ -116,9 +187,21 @@ class BackupAssigner:
 
         self.stats["reviewed"] += 1
 
-        # Print date header
-        booked_list = ", ".join(booked_djs)
-        print(f"[{index}/{total}] {date_display} — Booked: {booked_list}")
+        # Print date header with booking details (DJ + venue)
+        # Parse "Sat 3/28" to get "3/28" for gig DB lookup
+        date_key = date_display.split()[-1] if " " in date_display else date_display
+        gig_bookings = self.booking_details.get(date_key, [])
+
+        print(f"[{index}/{total}] {date_display}")
+        if gig_bookings:
+            for b in gig_bookings:
+                venue_str = f" @ {b['venue']}" if b['venue'] else ""
+                client_str = f" ({b['client']})" if b['client'] else ""
+                print(f"  Booked: {b['dj']}{venue_str}{client_str}")
+        else:
+            # Fallback to just DJ names from the matrix
+            booked_list = ", ".join(booked_djs)
+            print(f"  Booked: {booked_list}")
 
         # Build row_data dict (strip "(BOLD)" suffix from values)
         row_data = {}
@@ -158,6 +241,17 @@ class BackupAssigner:
             self.stats["skipped"] += 1
             return
 
+        # Build booking context string for the dialog
+        booking_context = None
+        if gig_bookings:
+            context_parts = []
+            for b in gig_bookings:
+                part = b['dj']
+                if b['venue']:
+                    part += f" @ {b['venue']}"
+                context_parts.append(part)
+            booking_context = " | ".join(context_parts)
+
         # Show backup dialog
         if self.dry_run:
             print(f"  [DRY RUN] Would show backup dialog")
@@ -165,7 +259,7 @@ class BackupAssigner:
             self.stats["skipped"] += 1
             return
 
-        backup_dj = show_backup_dialog(date_display, spots, candidates, None)
+        backup_dj = show_backup_dialog(date_display, spots, candidates, None, booking_context)
 
         if not backup_dj:
             print("  Skipped")

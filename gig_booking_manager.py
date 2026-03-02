@@ -902,10 +902,11 @@ def show_multiple_booking_dialog(dj_name, date_display, existing_count, existing
     return choice == "Add Booking"
 
 
-def show_backup_dialog(date_display, spots_remaining, candidates, existing_backup):
+def show_backup_dialog(date_display, spots_remaining, candidates, existing_backup, booking_context=None):
     """
     Show backup selection dialog.
     candidates: list of (dj_name, note_or_None) tuples.
+    booking_context: optional string with venue/DJ info for the date (shown in prompt).
     Returns selected DJ name, or None if skipped.
     """
     if existing_backup:
@@ -936,7 +937,8 @@ def show_backup_dialog(date_display, spots_remaining, candidates, existing_backu
 
     # AppleScript choose from list
     items_str = ", ".join(f'"{item}"' for item in items)
-    prompt = f"{date_display} — {spots_remaining} spot(s) remaining\\nNo backup assigned\\n\\nSelect backup DJ:"
+    context_line = f"\\n{booking_context}\\n" if booking_context else ""
+    prompt = f"{date_display} — {spots_remaining} spot(s) remaining{context_line}\\nNo backup assigned\\n\\nSelect backup DJ:"
     prompt_esc = prompt.replace('"', '\\"')
 
     script = f'''
