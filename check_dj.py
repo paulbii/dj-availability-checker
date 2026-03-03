@@ -25,6 +25,7 @@ except ImportError:
 
 from datetime import datetime, timedelta
 import calendar
+import subprocess
 
 # Import core functionality
 from dj_core import (
@@ -599,7 +600,16 @@ def main(sheet_name):
                 month_day = get_valid_date(f"\nEnter the {Style.BRIGHT}{year}{Style.RESET_ALL} date to check (MM-DD): ", year)
                 result = check_availability(sheet_name, month_day, service, spreadsheet, spreadsheet_id, client)
                 print(result)
-                
+
+                # Copy date to clipboard in MM-DD-YY format
+                try:
+                    date_obj = datetime.strptime(f"{year}-{month_day}", "%Y-%m-%d")
+                    clipboard_date = date_obj.strftime("%m-%d-%y")
+                    subprocess.run(["pbcopy"], input=clipboard_date.encode(), check=True)
+                    print(f"{Fore.CYAN}Copied to clipboard: {clipboard_date}{Style.RESET_ALL}")
+                except Exception:
+                    pass
+
                 next_action = input("\nWhat would you like to do?\n  1. Check another date\n  2. Return to main menu\nChoice (1-2): ").strip()
                 if next_action != "1":
                     break

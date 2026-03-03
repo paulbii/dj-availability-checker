@@ -6,6 +6,7 @@ Requires: pip install pywebview
 
 import webview
 import json
+import subprocess
 import threading
 from datetime import datetime, timedelta
 import calendar
@@ -837,6 +838,15 @@ class Api:
                     lines.append({"text": "ℹ Gig database: Fresh data (just fetched)", "cls": "cyan"})
                 else:
                     lines.append({"text": f"ℹ Gig database: Cached from {cache_info['cache_time']} ({age} min ago)", "cls": "cyan"})
+
+            # Copy date to clipboard in MM-DD-YY format
+            try:
+                clipboard_date = date_obj.strftime("%m-%d-%y")
+                subprocess.run(["pbcopy"], input=clipboard_date.encode(), check=True)
+                lines.append({"text": f"Copied to clipboard: {clipboard_date}", "cls": "cyan"})
+            except Exception:
+                pass
+
             return lines
 
         except Exception as e:
