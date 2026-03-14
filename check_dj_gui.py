@@ -16,6 +16,7 @@ from dj_core import (
     init_google_sheets_from_file,
     get_date_availability_data,
     get_venue_inquiries_for_date,
+    get_full_inquiries_for_date,
     get_nearby_bookings_for_dj,
     check_dj_availability,
     is_weekend,
@@ -350,6 +351,9 @@ HTML = """
     <button onclick="switchPanel('booked')" id="nav-booked">
       <span class="icon">🚫</span> Fully Booked
     </button>
+    <button onclick="switchPanel('turnedaway')" id="nav-turnedaway">
+      <span class="icon">📋</span> Turned Away
+    </button>
     <div class="spacer"></div>
     <div class="cache-info" id="cacheInfo"></div>
   </div>
@@ -471,6 +475,19 @@ HTML = """
         </div>
       </div>
 
+      <!-- Turned Away -->
+      <div class="panel" id="panel-turnedaway">
+        <h2>Turned-Away Inquiries</h2>
+        <div class="input-row">
+          <div class="field">
+            <label>Date (MM-DD)</label>
+            <input type="text" id="turnedAwayDate" placeholder="07-05"
+              maxlength="5" onkeydown="if(event.key==='Enter') runTurnedAway()">
+          </div>
+          <button class="btn" onclick="runTurnedAway()">Search</button>
+        </div>
+      </div>
+
     </div>
 
     <!-- Results -->
@@ -559,6 +576,14 @@ HTML = """
     const end = document.getElementById('bookedEnd').value.trim();
     showLoading('Scanning for fully booked dates…');
     const result = await pywebview.api.check_fully_booked(start, end);
+    renderLines(result);
+  }
+
+  async function runTurnedAway() {
+    const date = document.getElementById('turnedAwayDate').value.trim();
+    if (!date) return;
+    showLoading('Searching inquiry tracker for ' + date + '…');
+    const result = await pywebview.api.check_turned_away(date);
     renderLines(result);
   }
 
@@ -1102,6 +1127,60 @@ class Api:
                 lines.append({"text": "", "cls": "divider"})
                 lines.append({"text": "TIP: Review your open inquiries for these dates to notify couples.", "cls": "yellow"})
                 lines.append({"text": "     [MAYBE] = Stefano blank cell - may be available if asked.", "cls": "yellow"})
+            return lines
+
+        except Exception as e:
+            return [{"text": f"Error: {str(e)}", "cls": "red"}]
+
+    def check_turned_away(self, date_str):
+        """Look up turned-away (Full) inquiries for a date."""
+        try:
+            # Copy to clipboard
+            try:
+                date_obj = datetime.strptime(f"{self.year}-{date_str}", "%Y-%m-%d")
+                clipboard_date = date_obj.strftime("%m-%d-%y")
+                subprocess.run(["pbcopy"], input=clipboard_date.encode(), check=True)
+            except Exception:
+                pass
+
+            results = get_full_inquiries_for_date(date_str, self.client, year=int(self.year))
+
+            lines = []
+            lines.append({"text": f"TURNED-AWAY INQUIRIES — {self.year}", "cls": "heading"})
+            lines.append({"text": f"Date: {date_str}", "cls": "heading"})
+            lines.append({"text": "", "cls": "divider"})
+
+            if results:
+                lines.append({"text": f"Found {len(results)} turned-away inquiry(ies):", "cls": "white"})
+                for i, r in enumerate(results, 1):
+                    tier = r.get('tier', 3)
+                    age = r.get('inquiry_age_label', '')
+                    age_str = f" ({age})" if age else ""
+
+                    if tier == 1:
+                        color = "green"
+                        tag = "REACH OUT"
+                    elif tier == 2:
+                        color = "yellow"
+                        tag = "MAYBE"
+                    else:
+                        color = "text-dim"
+                        tag = "STALE"
+
+                    lines.append({"text": "", "cls": "divider"})
+                    lines.append({"text": f"{i}. {r['venue']} [{tag}]", "cls": color})
+                    lines.append({"text": f"   Inquiry: {r['inquiry_date']}{age_str}", "cls": color})
+                    lines.append({"text": f"   Decision: {r['decision_date']}", "cls": color})
+            else:
+                lines.append({"text": "No turned-away inquiries found for this date.", "cls": "yellow"})
+
+            # Clipboard confirmation
+            try:
+                lines.append({"text": "", "cls": "divider"})
+                lines.append({"text": f"Copied to clipboard: {clipboard_date}", "cls": "cyan"})
+            except Exception:
+                pass
+
             return lines
 
         except Exception as e:

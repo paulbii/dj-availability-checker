@@ -12,6 +12,7 @@ from dj_core import (
     get_date_availability_data,
     get_columns_for_year,
     get_venue_inquiries_for_date,
+    get_full_inquiries_for_date,
     get_nearby_bookings_for_dj,
     check_dj_availability,
     is_weekend,
@@ -691,6 +692,59 @@ def tab_fully_booked(year, service, spreadsheet, spreadsheet_id):
         st.caption("[MAYBE] = Stefano blank cell — may be available if asked.")
 
 
+def tab_turned_away(year, client):
+    """Tab 6: Turned-away inquiries for a specific date."""
+    st.subheader("Turned-Away Inquiries")
+    st.caption("Search for inquiries where we were full on a specific date.")
+
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        date_input = st.text_input("Date (MM-DD)", key="turned_away_date", placeholder="07-05")
+
+    if st.button("Search", key="turned_away_btn"):
+        if not date_input:
+            st.warning("Please enter a date.")
+            return
+
+        # Validate date
+        try:
+            datetime.strptime(f"{year}-{date_input}", "%Y-%m-%d")
+        except ValueError:
+            st.error("Invalid date format. Use MM-DD (e.g., 07-05).")
+            return
+
+        with st.spinner("Searching inquiry tracker..."):
+            results = get_full_inquiries_for_date(date_input, client, year=int(year))
+
+        if results:
+            st.markdown(f"Found **{len(results)}** turned-away inquiry(ies) for {date_input}:")
+            for i, r in enumerate(results, 1):
+                tier = r.get('tier', 3)
+                age = r.get('inquiry_age_label', '')
+                age_str = f" ({age})" if age else ""
+
+                if tier == 1:
+                    tag = ":green[REACH OUT]"
+                    venue_color = f":green[**{i}. {r['venue']}**]"
+                elif tier == 2:
+                    tag = ":orange[MAYBE]"
+                    venue_color = f":orange[**{i}. {r['venue']}**]"
+                else:
+                    tag = "STALE"
+                    venue_color = f"~~{i}. {r['venue']}~~"
+
+                with st.container():
+                    st.markdown(f"{venue_color} {tag}")
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        st.caption(f"Inquiry: {r['inquiry_date']}{age_str}")
+                    with col_b:
+                        st.caption(f"Decision: {r['decision_date']}")
+                    st.divider()
+        else:
+            st.info(f"No turned-away inquiries found for {date_input}.")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -724,12 +778,13 @@ def main():
     service, spreadsheet, spreadsheet_id, client = get_sheets_connection()
 
     # Tabs for each query type
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📅 Check Date",
         "📊 Date Range",
         "🔍 Min. Availability",
         "🎧 DJ Availability",
         "🚫 Fully Booked",
+        "📋 Turned Away",
     ])
 
     with tab1:
@@ -746,6 +801,9 @@ def main():
 
     with tab5:
         tab_fully_booked(year, service, spreadsheet, spreadsheet_id)
+
+    with tab6:
+        tab_turned_away(year, client)
 
 
 if __name__ == "__main__":

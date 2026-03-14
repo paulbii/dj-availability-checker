@@ -32,6 +32,7 @@ from dj_core import (
     init_google_sheets_from_file,
     get_date_availability_data,
     get_venue_inquiries_for_date,
+    get_full_inquiries_for_date,
     get_nearby_bookings_for_dj,
     check_dj_availability,
     is_weekend,
@@ -572,7 +573,8 @@ def display_menu():
     print("3. Find dates with minimum availability")
     print("4. Check DJ availability in range")
     print("5. List fully booked dates")
-    print("6. Exit")
+    print("6. Turned-away inquiries for a date")
+    print("7. Exit")
     print("=" * 50)
 
 
@@ -593,7 +595,7 @@ def main(sheet_name):
     
     while True:
         display_menu()
-        choice = input("\nSelect an option (1-6): ").strip()
+        choice = input("\nSelect an option (1-7): ").strip()
         
         if choice == "1":
             while True:
@@ -703,8 +705,52 @@ def main(sheet_name):
                     break
             
         elif choice == "6":
+            while True:
+                month_day = get_valid_date(f"\nEnter the {Style.BRIGHT}{year}{Style.RESET_ALL} date to check (MM-DD): ", year)
+
+                # Copy date to clipboard
+                try:
+                    date_obj = datetime.strptime(f"{year}-{month_day}", "%Y-%m-%d")
+                    clipboard_date = date_obj.strftime("%m-%d-%y")
+                    subprocess.run(["pbcopy"], input=clipboard_date.encode(), check=True)
+                    print(f"{Fore.CYAN}Copied to clipboard: {clipboard_date}{Style.RESET_ALL}")
+                except Exception:
+                    pass
+
+                print(f"\n{Fore.YELLOW}Searching inquiry tracker for turned-away inquiries...{Style.RESET_ALL}")
+                results = get_full_inquiries_for_date(month_day, client, year=year_int)
+
+                if results:
+                    print(f"\n{Style.BRIGHT}Found {len(results)} turned-away inquiry(ies) for {month_day}:{Style.RESET_ALL}\n")
+                    for i, r in enumerate(results, 1):
+                        tier = r.get('tier', 3)
+                        age = r.get('inquiry_age_label', '')
+                        age_str = f" ({age})" if age else ""
+
+                        if tier == 1:
+                            color = Fore.GREEN
+                            tag = "REACH OUT"
+                        elif tier == 2:
+                            color = Fore.YELLOW
+                            tag = "MAYBE"
+                        else:
+                            color = Style.DIM
+                            tag = "STALE"
+
+                        print(f"  {color}{Style.BRIGHT}{i}. {r['venue']} [{tag}]{Style.RESET_ALL}")
+                        print(f"  {color}   Inquiry: {r['inquiry_date']}{age_str}{Style.RESET_ALL}")
+                        print(f"  {color}   Decision: {r['decision_date']}{Style.RESET_ALL}")
+                        print()
+                else:
+                    print(f"\n{Fore.YELLOW}No turned-away inquiries found for {month_day}.{Style.RESET_ALL}")
+
+                next_action = input("\nWhat would you like to do?\n  1. Check another date\n  2. Return to main menu\nChoice (1-2): ").strip()
+                if next_action != "1":
+                    break
+
+        elif choice == "7":
             print("\nGoodbye!")
             break
-            
+
         else:
-            print("Invalid option. Please select 1-6.")
+            print("Invalid option. Please select 1-7.")

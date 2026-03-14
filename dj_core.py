@@ -1202,6 +1202,125 @@ def get_venue_inquiries_for_date(event_date_str, client):
         }
 
 
+def get_full_inquiries_for_date(event_date_str, client, year=None):
+    """
+    Get inquiries where we were full for a specific date.
+
+    Args:
+        event_date_str: Date string in format like "Fri 1/3", "1/3", or "1/3/2026"
+        client: Authorized gspread client
+        year: Optional year (int) to match against. If None, matches month/day only.
+
+    Returns:
+        list of dicts with 'event_date', 'venue', 'inquiry_date', 'decision_date'
+        for inquiries where resolution was 'Full'
+    """
+    try:
+        inquiries_spreadsheet = client.open_by_key(INQUIRIES_SPREADSHEET_ID)
+        inquiries_sheet = inquiries_spreadsheet.worksheet(INQUIRIES_SHEET_NAME)
+
+        all_data = inquiries_sheet.get_all_records()
+
+        # Parse target date
+        if ' ' in event_date_str:
+            date_part = event_date_str.split(' ')[1]
+        else:
+            date_part = event_date_str
+
+        # Support both "/" and "-" separators (e.g., "7/11" or "07-11")
+        if '/' in date_part:
+            parts = date_part.split('/')
+        else:
+            parts = date_part.split('-')
+        if len(parts) < 2:
+            return []
+
+        target_month = int(parts[0])
+        target_day = int(parts[1])
+        target_year = int(parts[2]) if len(parts) == 3 else year
+        # Handle 2-digit years
+        if target_year and target_year < 100:
+            target_year += 2000
+
+        results = []
+
+        for row in all_data:
+            event_date = str(row.get('Event Date', '')).strip()
+            resolution = str(row.get('Resolution', '')).strip()
+
+            if not event_date or resolution != 'Full':
+                continue
+
+            # Parse the event date
+            parsed_event = None
+            for fmt in ["%m/%d/%Y", "%m/%d/%y"]:
+                try:
+                    parsed_event = datetime.strptime(event_date, fmt)
+                    break
+                except ValueError:
+                    continue
+
+            if not parsed_event:
+                continue
+
+            # Check match
+            if parsed_event.month != target_month or parsed_event.day != target_day:
+                continue
+            if target_year and parsed_event.year != target_year:
+                continue
+
+            venue = str(row.get('Venue (if known)', '')).strip()
+            inquiry_date_str = str(row.get('Inquiry Date', '')).strip()
+            decision_date_str = str(row.get('Decision Date', '')).strip()
+
+            # Calculate inquiry age and tier
+            inquiry_age_days = None
+            inquiry_age_label = ""
+            tier = 3  # default: stale
+            if inquiry_date_str:
+                parsed_inquiry = None
+                for fmt in ["%m/%d/%Y", "%m/%d/%y"]:
+                    try:
+                        parsed_inquiry = datetime.strptime(inquiry_date_str, fmt)
+                        break
+                    except ValueError:
+                        continue
+                if parsed_inquiry:
+                    inquiry_age_days = (datetime.now() - parsed_inquiry).days
+                    weeks = inquiry_age_days // 7
+                    if inquiry_age_days < 7:
+                        inquiry_age_label = f"{inquiry_age_days} day{'s' if inquiry_age_days != 1 else ''} ago"
+                    elif weeks < 10:
+                        inquiry_age_label = f"{weeks} week{'s' if weeks != 1 else ''} ago"
+                    else:
+                        months = inquiry_age_days // 30
+                        inquiry_age_label = f"{months} month{'s' if months != 1 else ''} ago"
+
+                    if inquiry_age_days <= 28:       # Tier 1: within 4 weeks
+                        tier = 1
+                    elif inquiry_age_days <= 70:      # Tier 2: 5-10 weeks
+                        tier = 2
+                    else:                             # Tier 3: older than 10 weeks
+                        tier = 3
+
+            results.append({
+                'event_date': event_date,
+                'venue': venue if venue else '(no venue)',
+                'inquiry_date': inquiry_date_str if inquiry_date_str else '—',
+                'decision_date': decision_date_str if decision_date_str else '—',
+                'inquiry_age_label': inquiry_age_label,
+                'inquiry_age_days': inquiry_age_days,
+                'tier': tier,
+            })
+
+        # Sort by tier (1 first), then by recency within tier
+        results.sort(key=lambda r: (r['tier'], r['inquiry_age_days'] if r['inquiry_age_days'] is not None else 9999))
+        return results
+
+    except Exception as e:
+        return []
+
+
 def get_nearby_bookings_for_dj(dj_name, date_obj, year, service, spreadsheet, spreadsheet_id):
     """
     Get nearby bookings for a DJ (3 days before and after the target date)
