@@ -301,50 +301,35 @@ def clear_maxed(spreadsheet, year, row_number, event_date, dry_run=False):
 # INTERACTIVE SELECTION
 # =============================================================================
 
-def display_and_select(suggestions):
+def display_and_select(additions, removals):
     """
-    Display suggestions grouped by rule category, prompt for selection.
-    Returns list of (date, row_number, current_value) to apply.
+    Display additions and removals in two sections, prompt for selection.
+    Returns list of (action, date, row_number, current_value) to apply.
+    action is "add" or "remove".
     """
-    if not suggestions:
-        print("\n✅  No suggested MAXED dates — Stefano's column looks clean.")
+    if not additions and not removals:
+        print("\nNo changes needed -- Stefano's column is in sync.")
         return []
-
-    # Separate into buffer-only, cap-only, and both
-    buffer_dates = {}
-    cap_dates    = {}
-    both_dates   = {}
-
-    for d, (row, val, reasons) in suggestions.items():
-        has_buffer = any("buffer" in r for r in reasons)
-        has_cap    = any("cap"    in r for r in reasons)
-        if has_buffer and has_cap:
-            both_dates[d] = (row, val, reasons)
-        elif has_buffer:
-            buffer_dates[d] = (row, val, reasons)
-        else:
-            cap_dates[d] = (row, val, reasons)
 
     ordered = []
 
-    def print_group(label, group):
+    def print_group(label, group, action):
         if not group:
             return
-        print(f"\n── {label} {'─' * (52 - len(label))}")
+        print(f"\n-- {label} {'-' * (52 - len(label))}")
         for d in sorted(group):
             row, val, reasons = group[d]
             idx = len(ordered) + 1
             current = f"  (currently: {val})" if val else ""
             print(f"  [{idx:2d}]  {d.strftime('%a %b %-d')}{current}")
             for r in reasons:
-                print(f"         → {r}")
-            ordered.append((d, row, val))
+                print(f"         -> {r}")
+            ordered.append((action, d, row, val))
 
-    print_group("Weekend Buffer",    buffer_dates)
-    print_group("Monthly Cap",       cap_dates)
-    print_group("Buffer + Cap",      both_dates)
+    print_group("Dates to MAXED", additions, "add")
+    print_group("Dates to Open Up", removals, "remove")
 
-    print(f"\n  {len(ordered)} dates suggested.")
+    print(f"\n  {len(ordered)} change(s) suggested.")
     print("  Enter numbers to apply (e.g. 1,3,5), 'all', or press Enter to skip: ", end="")
 
     raw = input().strip().lower()
@@ -356,11 +341,11 @@ def display_and_select(suggestions):
         return ordered
 
     try:
-        indices  = [int(x.strip()) - 1 for x in raw.split(",")]
+        indices = [int(x.strip()) - 1 for x in raw.split(",")]
         selected = [ordered[i] for i in indices if 0 <= i < len(ordered)]
         return selected
     except ValueError:
-        print("⚠️  Could not parse input. No changes made.")
+        print("Could not parse input. No changes made.")
         return []
 
 
