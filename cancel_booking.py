@@ -28,6 +28,7 @@ from dj_core import (
     COLUMN_MAPS,
     get_dj_initials,
     get_dj_short_name,
+    get_default_cell_value,
     is_paid_backup,
     init_google_sheets_from_file,
     get_full_inquiries_for_date,
@@ -44,38 +45,6 @@ from gig_booking_manager import (
     get_backup_title,
     extract_client_first_names,
 )
-
-
-# ── Default cell values per DJ based on day of week ──────────────────────────
-# When a booking is cancelled, restore the cell to what it would be if no
-# booking existed. These match the spreadsheet formulas.
-
-def get_default_cell_value(dj_name, date_obj):
-    """
-    Return the default cell value for a DJ on a given date.
-    Matches the spreadsheet formulas:
-      - Woody:    weekends → OUT, weekdays → ""
-      - Stefano:  weekdays (Mon-Fri) and Sundays → OUT, Saturdays → ""
-      - Felipe:   weekdays (Mon-Fri) → OUT, weekends → ""
-      - Others:   always ""
-    """
-    weekday = date_obj.weekday()  # 0=Monday, 6=Sunday
-    is_weekend = weekday >= 5     # Saturday=5, Sunday=6
-
-    if dj_name == "Woody":
-        return "OUT" if is_weekend else ""
-
-    if dj_name == "Stefano":
-        # OUT on weekdays (Mon-Fri) and Sunday, blank on Saturday
-        if weekday == 5:  # Saturday
-            return ""
-        return "OUT"
-
-    if dj_name == "Felipe":
-        return "OUT" if not is_weekend else ""
-
-    # Henry, Paul, Stephanie — always blank
-    return ""
 
 
 # ── Calendar deletion ────────────────────────────────────────────────────────

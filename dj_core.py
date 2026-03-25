@@ -172,6 +172,34 @@ def date_to_sheet_format(date_obj):
     return f"{day_abbr} {month_day}"
 
 
+def get_default_cell_value(dj_name, date_obj):
+    """
+    Return the default cell value for a DJ on a given date.
+    Matches the spreadsheet formulas:
+      - Woody:    weekends -> OUT, weekdays -> ""
+      - Stefano:  weekdays (Mon-Fri) and Sundays -> OUT, Saturdays -> ""
+      - Felipe:   weekdays (Mon-Fri) -> OUT, weekends -> ""
+      - Others:   always ""
+    """
+    weekday = date_obj.weekday()  # 0=Monday, 6=Sunday
+    is_weekend = weekday >= 5     # Saturday=5, Sunday=6
+
+    if dj_name == "Woody":
+        return "OUT" if is_weekend else ""
+
+    if dj_name == "Stefano":
+        # OUT on weekdays (Mon-Fri) and Sunday, blank on Saturday
+        if weekday == 5:  # Saturday
+            return ""
+        return "OUT"
+
+    if dj_name == "Felipe":
+        return "OUT" if not is_weekend else ""
+
+    # Henry, Paul, Stephanie -- always blank
+    return ""
+
+
 def extract_client_first_names(client_name):
     """
     Extract first names for calendar title.
