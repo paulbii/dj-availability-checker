@@ -1,8 +1,8 @@
 """
-Stefano MAXED Enforcer
+Stefano MAXED Enforcer (Full Sync)
 
-Scans Stefano's availability matrix column, identifies dates that should be
-marked MAXED based on booking rules, and applies them with your approval.
+Recalculates which dates in Stefano's availability matrix column should be
+MAXED based on current bookings, then proposes both additions and removals.
 
 Rules applied:
   1. Weekend buffer: If Stefano is booked any Fri/Sat/Sun, the Fri/Sat/Sun of
@@ -11,7 +11,12 @@ Rules applied:
   2. Monthly cap: If a calendar month already has 2+ bookings, all remaining
      Fri/Sat/Sun dates in that month are MAXED.
 
-Overwrites cells that currently have OK or blank values.
+On every run, the script:
+  - Reads current matrix state
+  - Recalculates from scratch which dates should be MAXED
+  - Diffs against current state
+  - Proposes additions (new MAXED dates) and removals (stale MAXED dates)
+  - Applies selected changes to matrix and calendar
 
 Usage:
   python3 stefano_maxed_enforcer.py [--year 2026] [--dry-run]
@@ -354,26 +359,26 @@ def display_and_select(additions, removals):
 # =============================================================================
 
 def main():
-    parser = argparse.ArgumentParser(description="Stefano MAXED Enforcer")
-    parser.add_argument("--year",    default="2026", choices=["2026", "2027"],
+    parser = argparse.ArgumentParser(description="Stefano MAXED Enforcer (Full Sync)")
+    parser.add_argument("--year", default="2026", choices=["2026", "2027"],
                         help="Which year tab to scan (default: 2026)")
     parser.add_argument("--dry-run", action="store_true",
-                        help="Preview suggestions without writing any changes")
+                        help="Preview changes without writing")
     args = parser.parse_args()
 
-    year    = args.year
+    year = args.year
     dry_run = args.dry_run
 
-    print(f"\n🎧  Stefano MAXED Enforcer — {year}")
+    print(f"\nStefano MAXED Enforcer -- {year}")
     if dry_run:
-        print("    (DRY RUN — no changes will be made)\n")
+        print("    (DRY RUN -- no changes will be made)\n")
 
     # Connect
     print("Connecting to Google Sheets...")
     try:
         service, spreadsheet, spreadsheet_id, client = init_google_sheets_from_file()
     except Exception as e:
-        print(f"❌  Could not connect: {e}")
+        print(f"Could not connect: {e}")
         sys.exit(1)
 
     # Read
@@ -383,19 +388,19 @@ def main():
     # Analyze
     additions, removals, booked_fss = calculate_sync(rows, year)
 
-    already_maxed = sum(1 for _, _, v in rows if v in ("MAXED", "OUT"))
+    currently_maxed = sum(1 for _, _, v in rows if v == "MAXED")
+    correctly_maxed = currently_maxed - len(removals)
 
     print(f"\n  Booked dates (Fri/Sat/Sun): {len(booked_fss)}")
     if booked_fss:
-        print(f"  {', '.join(d.strftime('%b %-d') for d in sorted(booked_fss))}")
-    print(f"  Already MAXED/OUT: {already_maxed}")
-    print(f"  New suggestions:   {len(additions)}")
-    if removals:
-        print(f"  Dates to unblock:  {len(removals)}")
-    suggestions = additions
+        print(f"  {', '.join(d.strftime('%b %-d') for d in booked_fss)}")
+    print(f"  Currently MAXED: {currently_maxed}")
+    print(f"  Correctly MAXED: {correctly_maxed}")
+    print(f"  To add: {len(additions)}")
+    print(f"  To remove: {len(removals)}")
 
     # Select
-    selected = display_and_select(suggestions)
+    selected = display_and_select(additions, removals)
 
     if not selected:
         print("\nNo changes made.")
@@ -403,22 +408,31 @@ def main():
 
     # Apply
     print(f"\nApplying {len(selected)} change(s)...\n")
-    ok_matrix  = 0
-    ok_cal     = 0
+    ok_matrix = 0
+    ok_cal = 0
 
-    for d, row_number, current_val in selected:
+    for action, d, row_number, current_val in selected:
         print(f"  {d.strftime('%a %b %-d, %Y')}:")
 
-        if write_maxed(spreadsheet, year, row_number, dry_run):
-            print(f"      ✓ Matrix updated")
-            ok_matrix += 1
-
-        if create_calendar_event(d, dry_run):
-            print(f"      ✓ Calendar event created")
-            ok_cal += 1
+        if action == "add":
+            if write_maxed(spreadsheet, year, row_number, dry_run):
+                print(f"      Matrix -> MAXED")
+                ok_matrix += 1
+            if create_calendar_event(d, dry_run):
+                print(f"      Calendar event created")
+                ok_cal += 1
+        elif action == "remove":
+            if clear_maxed(spreadsheet, year, row_number, d, dry_run):
+                default = get_default_cell_value("Stefano", d)
+                display = default if default else "(blank)"
+                print(f"      Matrix -> {display}")
+                ok_matrix += 1
+            if delete_calendar_event(d, dry_run):
+                print(f"      Calendar event deleted")
+                ok_cal += 1
 
     tag = "[DRY RUN] " if dry_run else ""
-    print(f"\n{tag}Done — {ok_matrix} matrix update(s), {ok_cal} calendar event(s).")
+    print(f"\n{tag}Done -- {ok_matrix} matrix update(s), {ok_cal} calendar operation(s).")
 
 
 if __name__ == "__main__":
