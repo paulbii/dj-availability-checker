@@ -23,7 +23,7 @@ import sys
 from collections import defaultdict
 from datetime import date, timedelta
 
-from dj_core import init_google_sheets_from_file
+from dj_core import init_google_sheets_from_file, get_default_cell_value
 
 # =============================================================================
 # CONFIGURATION
@@ -232,6 +232,42 @@ def create_calendar_event(event_date, dry_run=False):
         return False
 
 
+def delete_calendar_event(event_date, dry_run=False):
+    """Delete [SB] MAXED OUT event(s) from the Unavailable calendar via AppleScript."""
+    if dry_run:
+        print(f"      [DRY RUN] Calendar: delete [SB] MAXED OUT on {event_date.strftime('%b %-d, %Y')}")
+        return True
+    try:
+        date_str = event_date.strftime("%B %d, %Y")
+        script = f'''
+        tell application "Calendar"
+            tell calendar "Unavailable"
+                set matchingEvents to (every event whose start date >= date "{date_str} 12:00:00 AM" and start date < date "{date_str} 11:59:59 PM" and summary contains "[SB]" and summary contains "MAXED")
+                set deletedCount to 0
+                repeat with anEvent in matchingEvents
+                    delete anEvent
+                    set deletedCount to deletedCount + 1
+                end repeat
+                return deletedCount
+            end tell
+        end tell
+        '''
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True, text=True, timeout=30,
+        )
+        count = result.stdout.strip()
+        if count.isdigit() and int(count) > 0:
+            return True
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr)
+        print(f"      Calendar: no matching event found to delete")
+        return True
+    except Exception as e:
+        print(f"      Calendar warning: {e}")
+        return True  # Don't fail -- matrix is source of truth
+
+
 # =============================================================================
 # SHEET WRITE
 # =============================================================================
@@ -244,6 +280,20 @@ def write_maxed(spreadsheet, year, row_number, dry_run=False):
 
     sheet = spreadsheet.worksheet(year)
     sheet.update_cell(row_number, STEFANO_COL_NUM, "MAXED")
+    return True
+
+
+def clear_maxed(spreadsheet, year, row_number, event_date, dry_run=False):
+    """Restore Stefano's cell to its default value (reversing a MAXED entry)."""
+    default_val = get_default_cell_value("Stefano", event_date)
+    display_val = default_val if default_val else "(blank)"
+
+    if dry_run:
+        print(f"      [DRY RUN] Matrix: row {row_number} -> {display_val}")
+        return True
+
+    sheet = spreadsheet.worksheet(year)
+    sheet.update_cell(row_number, STEFANO_COL_NUM, default_val)
     return True
 
 
