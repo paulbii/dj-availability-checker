@@ -21,7 +21,7 @@ import re
 import subprocess
 import sys
 import webbrowser
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import quote
 
 from dj_core import (
@@ -30,6 +30,7 @@ from dj_core import (
     get_dj_short_name,
     is_paid_backup,
     init_google_sheets_from_file,
+    get_full_inquiries_for_date,
 )
 
 from gig_booking_manager import (
@@ -387,7 +388,60 @@ class BookingCanceller:
             print(f"  • {action}")
         print()
 
+        # ── Check for turned-away inquiries ──
+        self._check_turned_away(date_obj, year)
+
         return True
+
+    def _check_turned_away(self, date_obj, year):
+        """Check for inquiries turned away (Full) on this date within 60 days."""
+        date_str = date_obj.strftime("%-m/%-d/%Y")
+        try:
+            results = get_full_inquiries_for_date(date_str, self.sheets.gc, year)
+        except Exception:
+            return
+
+        if not results:
+            return
+
+        # Filter to inquiries where decision date was within the last 60 days
+        cutoff = datetime.now() - timedelta(days=60)
+        recent = []
+        for r in results:
+            decision_str = r.get('decision_date', '')
+            if not decision_str or decision_str == '—':
+                continue
+            parsed = None
+            for fmt in ("%m/%d/%Y", "%m/%d/%y"):
+                try:
+                    parsed = datetime.strptime(decision_str, fmt)
+                    break
+                except ValueError:
+                    continue
+            if parsed and parsed >= cutoff:
+                recent.append(r)
+
+        if not recent:
+            return
+
+        print(f"{'=' * 60}")
+        print(f"  TURNED-AWAY INQUIRIES FOR THIS DATE")
+        print(f"{'=' * 60}")
+        for r in recent:
+            tier = r.get('tier', 3)
+            if tier == 1:
+                label = "REACH OUT"
+            elif tier == 2:
+                label = "MAYBE"
+            else:
+                label = "STALE"
+            venue = r.get('venue', '(no venue)')
+            age = r.get('inquiry_age_label', '')
+            inquiry_date = r.get('inquiry_date', '')
+            age_part = f" -- inquired {age}" if age else ""
+            date_part = f" ({inquiry_date})" if inquiry_date and inquiry_date != '—' else ""
+            print(f"  {'●' if tier == 1 else '○'} {label}: {venue}{age_part}{date_part}")
+        print()
 
 
 def main():
