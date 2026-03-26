@@ -27,6 +27,7 @@ import os
 import subprocess
 import argparse
 import webbrowser
+import imaplib
 from datetime import datetime, timedelta
 from urllib.parse import quote
 import re
@@ -80,6 +81,12 @@ FORM_FIELDS = {
 DEFAULT_CREDENTIALS_PATH = os.path.join(
     os.path.expanduser("~"), "Documents", "projects",
     "dj-availability-checker", "your-credentials.json"
+)
+
+# IMAP credentials for email folder creation (Paul's personal account)
+IMAP_CREDENTIALS_PATH = os.path.join(
+    os.path.expanduser("~"), "Documents", "projects",
+    "dj-availability-checker", "imap_credentials.json"
 )
 
 # Formula templates for auto-creating new date rows
@@ -1007,6 +1014,90 @@ def open_booking_log_form(booking):
 
 
 # =============================================================================
+# EMAIL FOLDER CREATION (Paul only)
+# =============================================================================
+
+def create_email_folder(booking, dry_run=False):
+    """
+    Create an IMAP email folder for a booking when the DJ is Paul.
+
+    Folder path: BIG FUN/<year>/<MM-DD-YY: first name and first name (planner)>
+    IMAP uses '.' as the hierarchy delimiter on most Bluehost setups.
+    """
+    # Build folder name: MM-DD-YY: client names (planner)
+    date_str = booking["date"].strftime("%m-%d-%y")
+    folder_name = f"{date_str}: {booking['client_display']}"
+    if booking["has_planner"]:
+        folder_name += " (planner)"
+
+    year = str(booking["year"])
+
+    # Load IMAP credentials
+    if not os.path.exists(IMAP_CREDENTIALS_PATH):
+        print(f"  ⚠️  IMAP credentials not found at {IMAP_CREDENTIALS_PATH}")
+        print("  Skipping email folder creation.")
+        return None
+
+    with open(IMAP_CREDENTIALS_PATH, "r") as f:
+        creds = json.load(f)
+
+    if creds.get("host", "").startswith("mail.your"):
+        print("  ⚠️  IMAP credentials not configured (still using template values)")
+        print("  Skipping email folder creation.")
+        return None
+
+    if dry_run:
+        print(f"  [DRY RUN] Would create email folder: BIG FUN/{year}/{folder_name}")
+        return folder_name
+
+    try:
+        imap = imaplib.IMAP4_SSL(creds["host"], creds.get("port", 993))
+        imap.login(creds["username"], creds["password"])
+
+        # Detect hierarchy delimiter
+        status, list_response = imap.list('""', 'INBOX')
+        delimiter = "."
+        if list_response and list_response[0]:
+            line = list_response[0].decode() if isinstance(list_response[0], bytes) else list_response[0]
+            # Format: (\\flags) "delimiter" "name"
+            parts = line.split('" "')
+            if len(parts) >= 2:
+                # Extract delimiter from between quotes
+                delim_part = parts[0]
+                d = delim_part.split('"')[-1] if '"' in delim_part else "."
+                if d:
+                    delimiter = d
+
+        # Build full folder path with detected delimiter
+        # Bluehost nests all folders under INBOX
+        full_path = f"INBOX{delimiter}BIG FUN{delimiter}{year}{delimiter}{folder_name}"
+
+        # Create the folder
+        status, response = imap.create(f'"{full_path}"')
+
+        if status == "OK":
+            # Subscribe so it shows up in mail clients
+            imap.subscribe(f'"{full_path}"')
+            print(f"  ✓ Created email folder: BIG FUN/{year}/{folder_name}")
+        elif b"ALREADYEXISTS" in (response[0] if response else b""):
+            print(f"  ✓ Email folder already exists: BIG FUN/{year}/{folder_name}")
+        else:
+            print(f"  ⚠️  Folder creation returned: {status} {response}")
+
+        imap.logout()
+        return folder_name
+
+    except imaplib.IMAP4.error as e:
+        print(f"  ⚠️  IMAP error: {e}")
+        print("  Skipping email folder creation.")
+        return None
+    except Exception as e:
+        print(f"  ⚠️  Email folder error: {e}")
+        print("  Skipping email folder creation.")
+        return None
+
+
+# =============================================================================
 # MAIN ORCHESTRATOR
 # =============================================================================
 
@@ -1373,6 +1464,19 @@ class GigBookingManager:
                 print(f"  ✓ Created: {backup_title}")
 
         print()
+
+        # -----------------------------------------------------------------
+        # Phase 4: Email folder (Paul only)
+        # -----------------------------------------------------------------
+        if booking["dj_short_name"] == "Paul":
+            print("— Creating email folder...")
+            folder_name = create_email_folder(booking, dry_run=self.dry_run)
+            if folder_name:
+                if self.dry_run:
+                    self.log(f"Email: would create folder '{folder_name}'")
+                else:
+                    self.log(f"Email: created folder '{folder_name}'")
+            print()
 
         # =================================================================
         # Summary
