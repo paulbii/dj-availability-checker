@@ -128,7 +128,7 @@ BACKUP_ELIGIBLE_DJS = {
 # unavailable and warns — preventing typos from silently counting as "available".
 KNOWN_CELL_VALUES = {
     "booked", "backup", "out", "maxed", "reserved", "stanford",
-    "ok", "ok to backup", "dad", "last", "aag",
+    "ok", "ok to backup", "dad", "last", "aag", "wedfaire",
 }
 
 
@@ -516,12 +516,12 @@ def get_bulk_availability_data(year, service, spreadsheet, spreadsheet_id, start
                 # Handle compound statuses like "BOOKED, BACKUP"
                 statuses = [s.strip() for s in value_lower.split(',')]
 
-                if 'booked' in statuses:
+                if 'booked' in statuses or 'wedfaire' in statuses:
                     booked_djs.append(dj_name)
                 if 'backup' in statuses:
                     backup_assigned.append(dj_name)
 
-                if 'booked' in statuses or 'backup' in statuses:
+                if 'booked' in statuses or 'backup' in statuses or 'wedfaire' in statuses:
                     pass  # Already handled above
                 elif value_lower == "reserved":
                     # Stephanie can have RESERVED status
@@ -567,7 +567,7 @@ def get_bulk_availability_data(year, service, spreadsheet, spreadsheet_id, start
 
 def init_google_sheets_from_file(credentials_file='your-credentials.json'):
     """Initialize Google Sheets connection from credentials file"""
-    creds = ServiceAccountCredentials.from_json_keyfile_name(credentials_file, SCOPE)
+    creds = Credentials.from_service_account_file(credentials_file, scopes=SCOPE)
     client = gspread.authorize(creds)
     service = build('sheets', 'v4', credentials=creds)
     spreadsheet = client.open_by_key(SPREADSHEET_ID)
@@ -576,7 +576,7 @@ def init_google_sheets_from_file(credentials_file='your-credentials.json'):
 
 def init_google_sheets_from_dict(credentials_dict):
     """Initialize Google Sheets connection from credentials dictionary (for Streamlit secrets)"""
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, SCOPE)
+    creds = Credentials.from_service_account_info(credentials_dict, scopes=SCOPE)
     client = gspread.authorize(creds)
     service = build('sheets', 'v4', credentials=creds)
     spreadsheet = client.open_by_key(SPREADSHEET_ID)
@@ -874,9 +874,9 @@ def check_dj_availability(dj_name, value, date_obj=None, is_bold=False, year=Non
         if value_lower == "out":
             return False, False  # Normal OUT rules apply
     
-    if value_lower == "booked" or value_lower == "backup":
+    if value_lower == "booked" or value_lower == "backup" or value_lower == "wedfaire":
         return False, False
-    
+
     # Handle RESERVED and STANFORD status (treated as booked)
     if value_lower == "reserved" or value_lower == "stanford":
         return False, False  # Treated as booked
@@ -980,7 +980,7 @@ def analyze_availability(selected_data, date_obj, year=None):
             
             continue
             
-        if value_lower == "booked" or "aag" in value_lower or value_lower == "stanford":
+        if value_lower == "booked" or "aag" in value_lower or value_lower == "stanford" or value_lower == "wedfaire":
             booked_count += 1
     
     # Second pass: analyze availability
@@ -996,7 +996,7 @@ def analyze_availability(selected_data, date_obj, year=None):
         if value_lower == "backup":
             backup_count += 1
         # Only check availability for non-booked and non-backup DJs
-        elif value_lower != "booked" and value_lower != "stanford":
+        elif value_lower != "booked" and value_lower != "stanford" and value_lower != "wedfaire":
             can_book, can_backup = check_dj_availability(name, value, date_obj, is_bold, year, warn=False)
             if can_book:
                 available_for_booking.append(name)

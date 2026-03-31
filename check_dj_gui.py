@@ -793,7 +793,7 @@ class Api:
                     if steph_booking:
                         venue = steph_booking.get('venue', '')
                         t = f"{label}: BOOKED ({venue})"
-                        if clean_lower != "booked":
+                        if clean_lower != "booked" and clean_lower != "wedfaire":
                             if clean_value:
                                 t += f'  ⚠️  matrix shows "{clean_value}"'
                             else:
@@ -885,7 +885,7 @@ class Api:
         if gig_booking:
             venue = gig_booking.get('venue', '')
             t = f"{dj_name}: BOOKED ({venue})"
-            if clean_lower != "booked":
+            if clean_lower != "booked" and clean_lower != "wedfaire":
                 if clean_value:
                     t += f'  ⚠️  matrix shows "{clean_value}"'
                 else:
@@ -1023,7 +1023,7 @@ class Api:
                 clean_value = str(value).replace(" (BOLD)", "") if value else ""
                 vl = clean_value.lower()
 
-                if "booked" in vl or vl == "stanford" or vl == "reserved":
+                if "booked" in vl or vl == "stanford" or vl == "reserved" or vl == "wedfaire":
                     booked_date_infos.append(date_info)
                 elif "backup" in vl:
                     backup_dates.append(date_info['date'])

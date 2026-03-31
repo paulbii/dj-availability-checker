@@ -257,10 +257,10 @@ class BookingCanceller:
         current_val = (row_data.get(dj_name, "") or "").strip()
         current_lower = current_val.lower()
 
-        if "booked" not in current_lower and "reserved" not in current_lower:
+        if "booked" not in current_lower and "reserved" not in current_lower and "wedfaire" not in current_lower:
             msg = (
                 f"{dj_name}'s cell on {date_display} shows \"{current_val}\" "
-                f"(expected BOOKED or RESERVED)."
+                f"(expected BOOKED, RESERVED, or WEDFAIRE)."
             )
             print(f"  WARNING: {msg}")
             if not self.dry_run:

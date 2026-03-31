@@ -346,7 +346,7 @@ def can_backup(dj_name, cell_value, is_bold, date_obj, year):
             return False, None
 
     # Universal: already booked, already backup, or maxed → no
-    if any(s in ("booked", "backup", "maxed", "reserved") for s in statuses):
+    if any(s in ("booked", "backup", "maxed", "reserved", "wedfaire") for s in statuses):
         return False, None
 
     # STANFORD and LAST: DJ is available for booking and backup

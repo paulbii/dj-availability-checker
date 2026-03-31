@@ -139,7 +139,7 @@ def calculate_sync(rows, year):
     # Only Fri/Sat/Sun bookings trigger rules
     booked_fss = [
         d for d, row, val in rows
-        if val == "BOOKED" and is_fss(d)
+        if val in ("BOOKED", "WEDFAIRE") and is_fss(d)
     ]
 
     # Build the set of dates that SHOULD be MAXED, with reasons

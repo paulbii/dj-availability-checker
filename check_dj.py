@@ -56,7 +56,7 @@ def format_dj_status(dj_name, value, date_obj, is_bookable, is_backup, year=None
         venue = gig_booking.get('venue', '')
         line = f"{Fore.RED}{dj_name}: BOOKED ({venue}){Style.RESET_ALL}"
         # Warn if matrix cell doesn't match the gig database
-        if clean_lower != "booked":
+        if clean_lower != "booked" and clean_lower != "wedfaire":
             if clean_value:
                 line += f"  {Fore.YELLOW}⚠️  matrix shows \"{clean_value}\"{Style.RESET_ALL}"
             else:
@@ -426,7 +426,7 @@ def query_dj_availability(sheet_name, dj_name, start_date_str, end_date_str, ser
         clean_value = str(value).replace(" (BOLD)", "") if value else ""
         value_lower = clean_value.lower()
         
-        if "booked" in value_lower or value_lower == "stanford" or value_lower == "reserved":
+        if "booked" in value_lower or value_lower == "stanford" or value_lower == "reserved" or value_lower == "wedfaire":
             booked_date_infos.append(date_info)
         elif "backup" in value_lower:
             backup_dates.append(date_info['date'])
