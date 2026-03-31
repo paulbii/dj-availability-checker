@@ -24,13 +24,13 @@ from unittest.mock import MagicMock
 # We only need DJ_EMAILS, DJ_NAME_MAP, and get_dj_short_name
 for mod_name in [
     "gspread",
-    "oauth2client", "oauth2client.service_account",
+    "google.oauth2", "google.oauth2.service_account",
     "googleapiclient", "googleapiclient.discovery",
 ]:
     if mod_name not in sys.modules:
         mock = types.ModuleType(mod_name)
-        if mod_name == "oauth2client.service_account":
-            mock.ServiceAccountCredentials = MagicMock()
+        if mod_name == "google.oauth2.service_account":
+            mock.Credentials = MagicMock()
         if mod_name == "googleapiclient.discovery":
             mock.build = MagicMock()
         sys.modules[mod_name] = mock

@@ -12,7 +12,7 @@ except ImportError:
 # Test 2: core dependencies
 try:
     import gspread
-    from oauth2client.service_account import ServiceAccountCredentials
+    from google.oauth2.service_account import Credentials
     from googleapiclient.discovery import build
     print(f"{Fore.GREEN}✓ Google Sheets packages working{Style.RESET_ALL}")
 except ImportError as e:
