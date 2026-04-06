@@ -101,6 +101,26 @@ DJ_EMAILS = {
     "Stephanie": "stephanie@bigfundj.com",
 }
 
+# DJ phone numbers (main BIG FUN line + individual extensions)
+DJ_PHONES = {
+    "Henry": "1-800-924-4386 ext. 702",
+    "Woody": "1-800-924-4386 ext. 703",
+    "Stefano": "1-800-924-4386 ext. 706",
+    "Paul": "1-800-924-4386 ext. 707",
+    "Stephanie": "1-800-924-4386 ext. 723",
+    "Felipe": "1-800-924-4386 ext. 727",
+}
+
+# Reverse lookup: initials -> full display name (with last names)
+DJ_FULL_NAMES = {
+    "HK": "Henry Kim",
+    "WM": "Woody Miraglia",
+    "PB": "Paul Burchfield",
+    "SB": "Stefano Bortolin",
+    "FS": "Felipe Silva",
+    "SD": "Stephanie",
+}
+
 # Backup payment categories
 PAID_BACKUP_DJS = {"Stefano", "Felipe", "Stephanie"}
 UNPAID_BACKUP_DJS = {"Henry", "Woody", "Paul"}
