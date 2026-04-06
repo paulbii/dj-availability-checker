@@ -8,6 +8,8 @@ HTML roster page, and uploads it via FTP to bigfundj.com/CLIENTS/nestldown/.
 
 import calendar as cal_module
 import datetime
+import ftplib
+import io
 import re
 from collections import defaultdict
 from zoneinfo import ZoneInfo
@@ -22,6 +24,10 @@ CALDAV_SERVICE = "bigfun-caldav"
 VENUE_FILTER = "nestldown"
 # Direct URL to the Gigs calendar (proven pattern from test_caldav_write.py)
 GIGS_CALENDAR_URL = "https://caldav.love2tap.com/calendars/__uids__/65B490A6-6667-48BC-B9E4-1A638DAA787E/1187934A-6A2E-43A3-8355-74382DC82F47/"
+
+FTP_SERVICE = "bigfun-ftp"
+FTP_REMOTE_DIR = "/CLIENTS/nestldown"
+FTP_FILENAME = "index.html"
 
 # Reverse lookup: initials -> first name (for email/phone lookup)
 # Exclude "Unknown" which maps to "UP" -- that's the unassigned fallback, not a real DJ
@@ -351,3 +357,41 @@ def generate_html(roster):
   </div>
 </body>
 </html>"""
+
+
+def setup_ftp_credentials():
+    """One-time FTP credential setup. Store in macOS Keychain."""
+    print("FTP Credential Setup for bigfundj.com")
+    print("=" * 40)
+    host = input("FTP host (e.g., bigfundj.com): ").strip()
+    username = input("FTP username: ").strip()
+    password = input("FTP password: ").strip()
+
+    keyring.set_password(FTP_SERVICE, "host", host)
+    keyring.set_password(FTP_SERVICE, "username", username)
+    keyring.set_password(FTP_SERVICE, "password", password)
+    print("Credentials saved to Keychain.")
+
+
+def upload_html(html_content):
+    """Upload HTML content to FTP server.
+
+    Returns True on success, False on failure.
+    """
+    host = keyring.get_password(FTP_SERVICE, "host")
+    username = keyring.get_password(FTP_SERVICE, "username")
+    password = keyring.get_password(FTP_SERVICE, "password")
+    if not all([host, username, password]):
+        print("ERROR: No FTP credentials found. Run with --setup-ftp first.")
+        return False
+
+    try:
+        ftp = ftplib.FTP(host)
+        ftp.login(username, password)
+        ftp.cwd(FTP_REMOTE_DIR)
+        ftp.storbinary(f"STOR {FTP_FILENAME}", io.BytesIO(html_content.encode("utf-8")))
+        ftp.quit()
+        return True
+    except Exception as e:
+        print(f"ERROR: FTP upload failed: {e}")
+        return False
