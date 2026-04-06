@@ -6,8 +6,10 @@ Reads Nestldown events from the Gigs calendar via CalDAV, generates a styled
 HTML roster page, and uploads it via FTP to bigfundj.com/CLIENTS/nestldown/.
 """
 
+import calendar as cal_module
 import datetime
 import re
+from collections import defaultdict
 from zoneinfo import ZoneInfo
 
 import caldav
@@ -144,3 +146,208 @@ def fetch_nestldown_events():
     # Sort chronologically
     roster.sort(key=lambda e: e["date"])
     return roster
+
+
+def generate_html(roster):
+    """Generate a self-contained HTML page from the roster data.
+
+    Args:
+        roster: list of dicts with keys: date, couple, dj_name, email, phone
+    Returns:
+        Complete HTML string
+    """
+    today = datetime.date.today()
+
+    # Group by year, then month
+    by_year_month = defaultdict(lambda: defaultdict(list))
+    for entry in roster:
+        by_year_month[entry["date"].year][entry["date"].month].append(entry)
+
+    def render_row(entry):
+        date_str = entry["date"].strftime("%a, %B %-d")
+        row_class = ""
+        if entry["date"] < today:
+            row_class = "past"
+        elif entry["dj_name"] == "Unassigned":
+            row_class = "unassigned"
+        cls = f' class="{row_class}"' if row_class else ""
+
+        return f"""            <tr{cls}>
+              <td>{date_str}</td>
+              <td>{entry['couple']}</td>
+              <td>{entry['dj_name']}</td>
+              <td>{entry['phone']}</td>
+              <td>{entry['email']}</td>
+            </tr>"""
+
+    sections = []
+    years = sorted(by_year_month.keys())
+    for year in years:
+        months = sorted(by_year_month[year].keys())
+        month_sections = []
+        for month in months:
+            month_name = cal_module.month_name[month]
+            rows = "\n".join(render_row(e) for e in by_year_month[year][month])
+            month_sections.append(f"""
+        <div class="month-section">
+          <h3>{month_name} {year}</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Couple</th>
+                <th>DJ</th>
+                <th>Phone</th>
+                <th>Email</th>
+              </tr>
+            </thead>
+            <tbody>
+{rows}
+            </tbody>
+          </table>
+        </div>""")
+
+        sections.append(f"""
+      <div class="year-section">
+        <h2>{year}</h2>
+        {"".join(month_sections)}
+      </div>""")
+
+    updated = datetime.datetime.now(TIMEZONE).strftime("%B %-d, %Y at %-I:%M %p %Z")
+
+    if not roster:
+        body_content = '<p class="no-events">No Nestldown events found for this period.</p>'
+    else:
+        body_content = "".join(sections)
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BIG FUN Disc Jockeys &mdash; Nestldown Event Roster</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@400;700&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+
+    body {{
+      font-family: 'Source Sans 3', sans-serif;
+      background: #f8f6f3;
+      color: #2c2c2c;
+      line-height: 1.5;
+      padding: 2rem 1rem;
+    }}
+
+    .container {{
+      max-width: 960px;
+      margin: 0 auto;
+    }}
+
+    header {{
+      margin-bottom: 2.5rem;
+      padding-bottom: 1.5rem;
+      border-bottom: 2px solid #d4c9b8;
+    }}
+
+    h1 {{
+      font-family: 'Libre Baskerville', serif;
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: #1a1a1a;
+      margin-bottom: 0.25rem;
+    }}
+
+    header p {{
+      font-size: 0.95rem;
+      color: #6b6158;
+    }}
+
+    h2 {{
+      font-family: 'Libre Baskerville', serif;
+      font-size: 1.35rem;
+      color: #1a1a1a;
+      margin-top: 2.5rem;
+      margin-bottom: 0.5rem;
+    }}
+
+    h3 {{
+      font-family: 'Source Sans 3', sans-serif;
+      font-size: 1rem;
+      font-weight: 600;
+      color: #8b7355;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-top: 1.75rem;
+      margin-bottom: 0.75rem;
+    }}
+
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 0.5rem;
+    }}
+
+    th {{
+      text-align: left;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #6b6158;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid #d4c9b8;
+    }}
+
+    td {{
+      padding: 0.6rem 0.75rem;
+      font-size: 0.95rem;
+      border-bottom: 1px solid #e8e2da;
+    }}
+
+    tr.past td {{
+      opacity: 0.45;
+    }}
+
+    tr.unassigned td {{
+      background: #fdf6ec;
+    }}
+
+    tr.unassigned td:nth-child(3) {{
+      font-style: italic;
+      color: #a08050;
+    }}
+
+    .no-events {{
+      margin-top: 2rem;
+      font-size: 1.05rem;
+      color: #6b6158;
+    }}
+
+    footer {{
+      margin-top: 3rem;
+      padding-top: 1rem;
+      border-top: 1px solid #d4c9b8;
+      font-size: 0.8rem;
+      color: #9a9088;
+    }}
+
+    @media (max-width: 640px) {{
+      h1 {{ font-size: 1.3rem; }}
+      td, th {{ padding: 0.4rem 0.5rem; font-size: 0.85rem; }}
+    }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>BIG FUN Disc Jockeys</h1>
+      <p>Nestldown Event Roster</p>
+    </header>
+    {body_content}
+    <footer>
+      Last updated {updated}
+    </footer>
+  </div>
+</body>
+</html>"""
