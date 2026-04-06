@@ -35,6 +35,9 @@ Thumbs.db
 .coverage
 htmlcov/
 
+# === Generated output ===
+output/*.html
+
 # === Personal Notes (optional) ===
 NOTES.md
 TODO.md
