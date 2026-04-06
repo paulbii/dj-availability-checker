@@ -6,10 +6,12 @@ Reads Nestldown events from the Gigs calendar via CalDAV, generates a styled
 HTML roster page, and uploads it via FTP to bigfundj.com/CLIENTS/nestldown/.
 """
 
+import argparse
 import calendar as cal_module
 import datetime
 import ftplib
 import io
+import os
 import re
 from collections import defaultdict
 from zoneinfo import ZoneInfo
@@ -26,7 +28,7 @@ VENUE_FILTER = "nestldown"
 GIGS_CALENDAR_URL = "https://caldav.love2tap.com/calendars/__uids__/65B490A6-6667-48BC-B9E4-1A638DAA787E/1187934A-6A2E-43A3-8355-74382DC82F47/"
 
 FTP_SERVICE = "bigfun-ftp"
-FTP_REMOTE_DIR = "/CLIENTS/nestldown"
+FTP_REMOTE_DIR = "/ROOTCLIENTS/nestldown"
 FTP_FILENAME = "index.html"
 
 # Reverse lookup: initials -> first name (for email/phone lookup)
@@ -395,3 +397,62 @@ def upload_html(html_content):
     except Exception as e:
         print(f"ERROR: FTP upload failed: {e}")
         return False
+
+
+OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
+OUTPUT_FILE = os.path.join(OUTPUT_DIR, "nestldown_roster.html")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Nestldown DJ Roster Page Generator"
+    )
+    parser.add_argument(
+        "--setup-ftp", action="store_true",
+        help="Set up FTP credentials in Keychain"
+    )
+    parser.add_argument(
+        "--local-only", action="store_true",
+        help="Generate HTML locally without uploading"
+    )
+    args = parser.parse_args()
+
+    if args.setup_ftp:
+        setup_ftp_credentials()
+        return
+
+    # Fetch events
+    print("Fetching Nestldown events from Gigs calendar...")
+    try:
+        roster = fetch_nestldown_events()
+    except RuntimeError as e:
+        print(f"ERROR: {e}")
+        return
+
+    print(f"  Found {len(roster)} Nestldown events")
+
+    # Generate HTML
+    print("Generating HTML...")
+    html = generate_html(roster)
+
+    # Save locally
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"  Saved to {OUTPUT_FILE}")
+
+    # Upload
+    if not args.local_only:
+        print("Uploading via FTP...")
+        if upload_html(html):
+            print("  Upload complete")
+        else:
+            print("  Upload failed. Local file available for inspection.")
+    else:
+        print("  Skipping upload (--local-only)")
+
+    print("Done.")
+
+
+if __name__ == "__main__":
+    main()
