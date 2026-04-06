@@ -247,7 +247,7 @@ def generate_html(roster):
     header {{
       margin-bottom: 2.5rem;
       padding-bottom: 1.5rem;
-      border-bottom: 2px solid #d4c9b8;
+      border-bottom: 2px solid #dd00aa;
     }}
 
     h1 {{
@@ -275,7 +275,7 @@ def generate_html(roster):
       font-family: 'Source Sans 3', sans-serif;
       font-size: 1rem;
       font-weight: 600;
-      color: #8b7355;
+      color: #dd00aa;
       text-transform: uppercase;
       letter-spacing: 0.05em;
       margin-top: 1.75rem;
