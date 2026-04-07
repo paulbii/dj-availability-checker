@@ -1,0 +1,41 @@
+======================================================================
+BOOKING SYSTEM COMPARISON REPORT
+Generated: 2026-02-15 11:04
+======================================================================
+
+STATISTICS
+----------------------------------------------------------------------
+  Gig Database:        128 bookings on 83 dates
+  Availability Matrix: 128 bookings on 82 dates
+  Master Calendar:     128 events on 82 dates
+
+STATUS: 2 DISCREPANCY(IES) FOUND
+======================================================================
+
+MISSING FROM AVAILABILITY MATRIX (1 dates)
+----------------------------------------------------------------------
+These are in the Gig Database but not marked BOOKED in the matrix:
+
+      7/18  Gig DB: Paul
+
+MISSING FROM MASTER CALENDAR (1 dates)
+----------------------------------------------------------------------
+These are in the Gig Database but not on the calendar:
+
+      7/18  Gig DB: Paul
+
+DJ ASSIGNMENT MISMATCHES (1 dates)
+----------------------------------------------------------------------
+These dates have different DJs across systems:
+
+      1/25
+           Gig DB:  Woody
+           Matrix:  Henry, Woody
+           Cal:     Henry, Woody
+
+BACKUP DJs: Matrix and Calendar are in sync
+
+======================================================================
+SUMMARY: 2 booking discrepancy(ies), 0 backup discrepancy(ies)
+Systems compared: Gig DB + Matrix + Calendar
+======================================================================

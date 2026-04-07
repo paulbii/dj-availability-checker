@@ -41,7 +41,9 @@ on run argv
 				FMDJ2: typeof FMDJ2 !== 'undefined' ? FMDJ2 : '',
 				FMsound: typeof FMsound !== 'undefined' ? FMsound : '',
 				FMcersound: typeof FMcersound !== 'undefined' ? FMcersound : '',
-				MailCoordinator: typeof MailCoordinator !== 'undefined' ? MailCoordinator : ''
+				MailCoordinator: typeof MailCoordinator !== 'undefined' ? MailCoordinator : '',
+				FMemail1: (function() { var el = document.editform ? document.editform['BookingContact1::IDEmail'] : null; return el ? el.value : ''; })(),
+				FMeventType: (function() { var el = document.editform ? document.editform['eventType'] : null; return el ? el.options[el.selectedIndex].text : ''; })()
 			})
 		" in document 1
 	end tell

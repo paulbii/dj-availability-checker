@@ -248,6 +248,13 @@ def parse_fm_format(raw):
     coordinator = raw.get("MailCoordinator", "")
     has_planner = bool(coordinator and coordinator.strip())
 
+    # Client email addresses (for nurture system)
+    email1 = raw.get("FMemail1", "").strip()
+    email2 = raw.get("FMemail2", "").strip()
+
+    # Event type
+    event_type = raw.get("FMeventType", "").strip()
+
     return {
         "date": date_obj,
         "date_display": date_to_sheet_format(date_obj),
@@ -269,6 +276,9 @@ def parse_fm_format(raw):
         "has_ceremony": has_ceremony,
         "has_planner": has_planner,
         "is_unassigned": dj_short in ("Unassigned", "Unknown"),
+        "email1": email1,
+        "email2": email2,
+        "event_type": event_type,
     }
 
 
@@ -300,6 +310,13 @@ def parse_clean_format(raw):
     has_ceremony = raw.get("has_ceremony_sound", False)
     has_planner = bool(raw.get("planner_name", ""))
 
+    # Client email addresses (for nurture system)
+    email1 = raw.get("email1", "").strip()
+    email2 = raw.get("email2", "").strip()
+
+    # Event type
+    event_type = raw.get("event_type", "").strip()
+
     return {
         "date": date_obj,
         "date_display": date_to_sheet_format(date_obj),
@@ -321,6 +338,9 @@ def parse_clean_format(raw):
         "has_ceremony": has_ceremony,
         "has_planner": has_planner,
         "is_unassigned": dj_short in ("Unassigned", "Unknown"),
+        "email1": email1,
+        "email2": email2,
+        "event_type": event_type,
     }
 
 
@@ -1119,6 +1139,114 @@ class GigBookingManager:
         self.actions.append(action)
         print(f"  {action}")
 
+    def _schedule_nurture_emails(self, booking):
+        """Schedule post-booking nurture emails for this couple."""
+        try:
+            from nurture_config import (
+                calculate_send_dates, determine_sender, get_recipients,
+                init_nurture_sheet, check_duplicate, col_index,
+                NURTURE_SPREADSHEET_ID, SHORT_BOOKER_MONTHS
+            )
+
+            if not NURTURE_SPREADSHEET_ID:
+                print("— Nurture emails: not configured (no spreadsheet ID). Skipping.")
+                print()
+                return
+
+            event_type = booking.get("event_type", "").lower()
+            if event_type and event_type != "wedding":
+                print(f"— Nurture emails: skipping (event type: {booking.get('event_type', 'unknown')})")
+                print()
+                return
+
+            # Soft launch: Paul's couples only
+            if booking["dj_short_name"] != "Paul":
+                print(f"— Nurture emails: skipping (DJ: {booking['dj_short_name']}, Paul only for now)")
+                print()
+                return
+
+            print("— Scheduling nurture emails...")
+
+            booking_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            event_date = booking["date"]
+            lead_days = (event_date - booking_date).days
+
+            if lead_days < SHORT_BOOKER_MONTHS * 30:
+                print(f"  ℹ️  Under {SHORT_BOOKER_MONTHS} months out. No nurture emails.")
+                print()
+                return
+
+            scheduled = calculate_send_dates(booking_date, event_date)
+            if not scheduled:
+                print("  ℹ️  No emails qualify for this timeline.")
+                print()
+                return
+
+            # Build rows
+            recipients = get_recipients(
+                booking.get("email1", ""), booking.get("email2", "")
+            )
+            email_str = ", ".join(recipients) if recipients else ""
+            sender = determine_sender(booking["dj_short_name"])
+            event_date_str = event_date.strftime('%m/%d/%Y')
+            booking_date_str = booking_date.strftime('%m/%d/%Y')
+
+            rows = []
+            for email in scheduled:
+                rows.append([
+                    booking["client_display"],
+                    email_str,
+                    booking["venue_name"],
+                    event_date_str,
+                    booking_date_str,
+                    email["num"],
+                    email["topic"],
+                    email["send_date"].strftime('%m/%d/%Y'),
+                    "pending",
+                    "",
+                    sender,
+                    booking["dj_short_name"] if not booking["is_unassigned"] else "",
+                    "",
+                ])
+
+            if self.dry_run:
+                print(f"  [DRY RUN] Would schedule {len(rows)} nurture email(s):")
+                for email in scheduled:
+                    print(f"    #{email['num']}  {email['send_date'].strftime('%b %d')}  "
+                          f"{email['topic']}")
+                if not email_str:
+                    print("  ⚠️  No email addresses in booking data.")
+                self.log(f"Nurture: would schedule {len(rows)} email(s)")
+                print()
+                return
+
+            # Write to sheet
+            worksheet = init_nurture_sheet(self.credentials_path)
+
+            if check_duplicate(worksheet, booking["client_display"], event_date_str):
+                print(f"  ⚠️  Nurture rows already exist. Skipping.")
+                self.log("Nurture: skipped (duplicate)")
+                print()
+                return
+
+            worksheet.append_rows(rows, value_input_option='USER_ENTERED')
+            print(f"  ✓ {len(rows)} nurture email(s) scheduled")
+            if not email_str:
+                print("  ⚠️  No email addresses. Update the sheet when available.")
+            for email in scheduled:
+                print(f"    #{email['num']}  {email['send_date'].strftime('%b %d')}  "
+                      f"{email['topic']}")
+            self.log(f"Nurture: scheduled {len(rows)} email(s)")
+            print()
+
+        except ImportError:
+            print("— Nurture emails: system not installed. Skipping.")
+            print()
+        except Exception as e:
+            print(f"  ⚠️  Could not schedule nurture emails: {e}")
+            self.log(f"Nurture: failed ({e})")
+            print()
+
     def run(self, json_path):
         """Execute the full booking management flow."""
         print("\n" + "=" * 60)
@@ -1477,6 +1605,11 @@ class GigBookingManager:
                 else:
                     self.log(f"Email: created folder '{folder_name}'")
             print()
+
+        # -----------------------------------------------------------------
+        # Phase 5: Schedule nurture emails
+        # -----------------------------------------------------------------
+        self._schedule_nurture_emails(booking)
 
         # =================================================================
         # Summary

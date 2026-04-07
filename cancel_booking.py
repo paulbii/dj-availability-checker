@@ -214,7 +214,7 @@ class BookingCanceller:
         print()
 
         # ── Parse booking data ──
-        print("  [1/5] Parsing booking data...")
+        print("  [1/6] Parsing booking data...")
         booking = parse_booking_data(json_path)
         date_obj = booking["date"]
         year = booking["year"]
@@ -231,13 +231,13 @@ class BookingCanceller:
         print()
 
         # ── Connect to Sheets ──
-        print("  [2/5] Connecting to availability matrix...")
+        print("  [2/6] Connecting to availability matrix...")
         self.sheets.init()
         print("  Connected.")
         print()
 
         # ── Validate: confirm DJ is BOOKED ──
-        print("  [3/5] Validating booking in matrix...")
+        print("  [3/6] Validating booking in matrix...")
         row_num = self.sheets.find_date_row(date_obj, year)
         if not row_num:
             msg = f"Could not find {date_display} in the {year} sheet."
@@ -275,7 +275,7 @@ class BookingCanceller:
         print()
 
         # ── Clear DJ cell in matrix ──
-        print("  [4/5] Updating availability matrix...")
+        print("  [4/6] Updating availability matrix...")
         default_val = get_default_cell_value(dj_name, date_obj)
         display_val = f'"{default_val}"' if default_val else "(blank)"
 
@@ -311,7 +311,7 @@ class BookingCanceller:
         print()
 
         # ── Delete calendar events ──
-        print("  [5/5] Cleaning up calendar...")
+        print("  [5/6] Cleaning up calendar...")
 
         if self.dry_run:
             print(f"  [DRY RUN] Would delete {initials_bracket} event on {date_display}")
@@ -335,6 +335,11 @@ class BookingCanceller:
                 else:
                     print(f"  ⚠️  No backup calendar event found for {backup_dj}")
 
+        print()
+
+        # ── Clean up nurture emails ──
+        print("  [6/6] Cleaning up nurture emails...")
+        self._cancel_nurture_emails(booking, date_display)
         print()
 
         # ── Open Google Form ──
@@ -361,6 +366,63 @@ class BookingCanceller:
         self._check_turned_away(date_obj, year)
 
         return True
+
+    def _cancel_nurture_emails(self, booking, date_display):
+        """Mark any pending nurture emails for this booking as skipped."""
+        try:
+            from nurture_config import (
+                init_nurture_sheet, col_index, NURTURE_SPREADSHEET_ID
+            )
+
+            if not NURTURE_SPREADSHEET_ID:
+                print("  ℹ️  Nurture Tracker not configured. Skipping.")
+                return
+
+            worksheet = init_nurture_sheet(self.credentials_path)
+            all_rows = worksheet.get_all_values()
+
+            if len(all_rows) <= 1:
+                print("  ℹ️  No nurture rows to clean up.")
+                return
+
+            event_date_str = booking["date"].strftime('%m/%d/%Y')
+            venue = booking["venue_name"]
+            status_col = col_index("Status")
+            event_date_col = col_index("Event Date")
+            venue_col = col_index("Venue")
+            notes_col = col_index("Notes")
+
+            skipped_count = 0
+            today_str = datetime.now().strftime('%m/%d/%Y')
+
+            for i, row in enumerate(all_rows[1:], start=2):  # 1-indexed + header
+                row_event = row[event_date_col - 1].strip()
+                row_venue = row[venue_col - 1].strip()
+                row_status = row[status_col - 1].strip().lower()
+
+                if (row_event == event_date_str and
+                        row_venue == venue and
+                        row_status == 'pending'):
+                    if self.dry_run:
+                        print(f"  [DRY RUN] Would skip row {i}: email #{row[col_index('Email #') - 1]}")
+                    else:
+                        worksheet.update_cell(i, status_col, 'skipped')
+                        worksheet.update_cell(i, notes_col,
+                                              f"Booking cancelled {today_str}")
+                    skipped_count += 1
+
+            if skipped_count > 0:
+                action = "would skip" if self.dry_run else "skipped"
+                print(f"  ✓ {skipped_count} nurture email(s) {action}")
+                self.log(f"Nurture: {action} {skipped_count} pending email(s)")
+            else:
+                print("  ℹ️  No pending nurture emails found for this booking.")
+
+        except ImportError:
+            print("  ℹ️  Nurture system not installed. Skipping.")
+        except Exception as e:
+            print(f"  ⚠️  Could not clean up nurture emails: {e}")
+            self.log(f"Nurture: cleanup failed ({e})")
 
     def _check_turned_away(self, date_obj, year):
         """Check for inquiries turned away (Full) on this date within 60 days."""
