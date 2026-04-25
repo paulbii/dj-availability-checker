@@ -8,6 +8,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime, timedelta
 import calendar
+import time
 from googleapiclient.discovery import build
 import html
 import requests
@@ -586,12 +587,29 @@ def get_bulk_availability_data(year, service, spreadsheet, spreadsheet_id, start
         return None
 
 
+_TRANSIENT_API_CODES = {429, 500, 502, 503, 504}
+
+
+def open_spreadsheet_with_retry(client, spreadsheet_id, max_attempts=3):
+    # Streamlit Cloud cold starts occasionally land on a brief Google API
+    # blip. Retry only on transient codes; PermissionError (403) and
+    # SpreadsheetNotFound (404) propagate as gspread converts them.
+    for attempt in range(max_attempts):
+        try:
+            return client.open_by_key(spreadsheet_id)
+        except gspread.exceptions.APIError as e:
+            status = getattr(e.response, "status_code", None)
+            if status not in _TRANSIENT_API_CODES or attempt == max_attempts - 1:
+                raise
+            time.sleep(2 ** attempt)
+
+
 def init_google_sheets_from_file(credentials_file='your-credentials.json'):
     """Initialize Google Sheets connection from credentials file"""
     creds = Credentials.from_service_account_file(credentials_file, scopes=SCOPE)
     client = gspread.authorize(creds)
     service = build('sheets', 'v4', credentials=creds)
-    spreadsheet = client.open_by_key(SPREADSHEET_ID)
+    spreadsheet = open_spreadsheet_with_retry(client, SPREADSHEET_ID)
     return service, spreadsheet, SPREADSHEET_ID, client
 
 
@@ -600,7 +618,7 @@ def init_google_sheets_from_dict(credentials_dict):
     creds = Credentials.from_service_account_info(credentials_dict, scopes=SCOPE)
     client = gspread.authorize(creds)
     service = build('sheets', 'v4', credentials=creds)
-    spreadsheet = client.open_by_key(SPREADSHEET_ID)
+    spreadsheet = open_spreadsheet_with_retry(client, SPREADSHEET_ID)
     return service, spreadsheet, SPREADSHEET_ID, client
 
 
@@ -1151,9 +1169,9 @@ def get_venue_inquiries_for_date(event_date_str, client):
     """
     try:
         # Open the inquiries sheet
-        inquiries_spreadsheet = client.open_by_key(INQUIRIES_SPREADSHEET_ID)
+        inquiries_spreadsheet = open_spreadsheet_with_retry(client, INQUIRIES_SPREADSHEET_ID)
         inquiries_sheet = inquiries_spreadsheet.worksheet(INQUIRIES_SHEET_NAME)
-        
+
         # Get all data
         all_data = inquiries_sheet.get_all_records()
         
@@ -1265,7 +1283,7 @@ def get_full_inquiries_for_date(event_date_str, client, year=None):
         for inquiries where resolution was 'Full'
     """
     try:
-        inquiries_spreadsheet = client.open_by_key(INQUIRIES_SPREADSHEET_ID)
+        inquiries_spreadsheet = open_spreadsheet_with_retry(client, INQUIRIES_SPREADSHEET_ID)
         inquiries_sheet = inquiries_spreadsheet.worksheet(INQUIRIES_SHEET_NAME)
 
         all_data = inquiries_sheet.get_all_records()
