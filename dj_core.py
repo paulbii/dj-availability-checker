@@ -9,6 +9,7 @@ from google.oauth2.service_account import Credentials
 from datetime import datetime, timedelta
 import calendar
 from googleapiclient.discovery import build
+import html
 import requests
 from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -650,10 +651,10 @@ def get_gig_database_bookings(year, month_day):
         unassigned = []
         
         for booking in bookings:
-            full_name = booking.get('assigned_dj', '')
-            venue = booking.get('venue_name', '')
-            client = booking.get('client_name', '')
-            
+            full_name = html.unescape(booking.get('assigned_dj', ''))
+            venue = html.unescape(booking.get('venue_name', ''))
+            client = html.unescape(booking.get('client_name', ''))
+
             # Check for unassigned bookings
             if full_name.lower() == 'unassigned':
                 unassigned.append({
@@ -664,13 +665,13 @@ def get_gig_database_bookings(year, month_day):
                 # Extract first name and map to short name
                 first_name = full_name.split()[0].lower() if full_name else ''
                 short_name = DJ_NAME_MAP.get(first_name)
-                
+
                 if short_name:
                     assigned[short_name] = {
                         'venue': venue,
                         'client': client
                     }
-        
+
         return {'assigned': assigned, 'unassigned': unassigned}
         
     except Exception:
@@ -736,10 +737,10 @@ def get_gig_database_bookings_multiday(year, month_day):
             if date_key not in bookings_by_date:
                 bookings_by_date[date_key] = {'assigned': {}, 'unassigned': []}
             
-            full_name = booking.get('assigned_dj', '')
-            venue = booking.get('venue_name', '')
-            client = booking.get('client_name', '')
-            
+            full_name = html.unescape(booking.get('assigned_dj', ''))
+            venue = html.unescape(booking.get('venue_name', ''))
+            client = html.unescape(booking.get('client_name', ''))
+
             # Check for unassigned bookings
             if full_name.lower() == 'unassigned':
                 bookings_by_date[date_key]['unassigned'].append({

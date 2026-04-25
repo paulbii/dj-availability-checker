@@ -21,6 +21,7 @@ Usage:
   python3 gig_booking_manager.py sample_bookings/normal_booking.json --dry-run
 """
 
+import html
 import json
 import sys
 import os
@@ -194,6 +195,11 @@ def parse_booking_data(json_path):
     """Load and normalize booking data from FM or clean JSON format."""
     with open(json_path, "r") as f:
         raw = json.load(f)
+
+    # FileMaker exports can arrive with HTML entities baked in (e.g. "&" as
+    # "&amp;"), which flow untouched into calendar event titles. Decode at the
+    # boundary so downstream code sees plain text.
+    raw = {k: html.unescape(v) if isinstance(v, str) else v for k, v in raw.items()}
 
     # Detect format by presence of FM-specific field
     if "FMclient" in raw:

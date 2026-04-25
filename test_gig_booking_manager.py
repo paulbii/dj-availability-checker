@@ -610,6 +610,53 @@ class TestBookingParsing(unittest.TestCase):
         finally:
             os.unlink(path)
 
+    def test_clean_format_html_entities_decoded(self):
+        # Reproduces the Calendar bug where "&" arrived as "&amp;" in titles.
+        data = {
+            "event_date": "2026-05-02",
+            "client_name": "Little Hills Spring Social &amp; Showcase",
+            "assigned_dj": "Paul Burchfield",
+            "venue_name": "Little Hills &amp; Gardens",
+            "venue_street": "",
+            "venue_city_state_zip": "",
+            "setup_time": "3:00",
+            "clear_time": "9:00",
+            "sound_type": "Standard Speakers",
+            "has_ceremony_sound": False,
+            "planner_name": "",
+        }
+        path = self._write_json(data)
+        try:
+            booking = parse_booking_data(path)
+            self.assertEqual(booking["client_full"], "Little Hills Spring Social & Showcase")
+            self.assertEqual(booking["client_display"], "Little Hills Spring Social & Showcase")
+            self.assertEqual(booking["venue_name"], "Little Hills & Gardens")
+        finally:
+            os.unlink(path)
+
+    def test_fm_format_html_entities_decoded(self):
+        data = {
+            "FMeventDate": "05/02/2026",
+            "FMstartTime": "3:00",
+            "FMendTime": "9:00",
+            "FMclient": "Smith &amp; Jones",
+            "FMvenue": "Anderson &amp; Co. Estate",
+            "FMvenueAddress": "1 Main St***Faketown, CA 99999",
+            "FMDJ1": "Paul Burchfield",
+            "FMDJ2": "",
+            "FMsound": "Standard Speakers",
+            "FMcersound": "0",
+            "MailCoordinator": "",
+        }
+        path = self._write_json(data)
+        try:
+            booking = parse_booking_data(path)
+            self.assertEqual(booking["client_full"], "Smith & Jones")
+            self.assertEqual(booking["client_display"], "Smith & Jones")
+            self.assertEqual(booking["venue_name"], "Anderson & Co. Estate")
+        finally:
+            os.unlink(path)
+
 
 # =============================================================================
 # Mock Client Tests
