@@ -28,6 +28,7 @@ Usage:
   python3 confirmation_forwarder.py sample_bookings/sample_regular_booking.json
 """
 
+import html
 import json
 import sys
 import os
@@ -78,6 +79,11 @@ def parse_booking_json(json_path):
     """Parse booking JSON (supports both FM and clean formats)."""
     with open(json_path, 'r') as f:
         raw = json.load(f)
+
+    # FileMaker exports arrive with HTML entities baked in (e.g. "&" as
+    # "&amp;", "'" as "&#39;"). Decode at the boundary so MailMaven drafts
+    # show plain text.
+    raw = {k: html.unescape(v) if isinstance(v, str) else v for k, v in raw.items()}
 
     if "FMeventDate" in raw:
         return {

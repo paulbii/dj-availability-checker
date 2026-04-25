@@ -15,6 +15,7 @@ Usage:
 """
 
 import argparse
+import html
 import json
 import os
 import sys
@@ -41,6 +42,10 @@ def parse_booking_for_nurture(booking_path, email_args=None):
     """
     with open(booking_path, 'r') as f:
         data = json.load(f)
+
+    # FileMaker exports arrive with HTML entities baked in (e.g. "'" as
+    # "&#39;"). Decode at the boundary so downstream nurture rows are clean.
+    data = {k: html.unescape(v) if isinstance(v, str) else v for k, v in data.items()}
 
     # Detect format
     if 'FMclient' in data or 'FMeventDate' in data:

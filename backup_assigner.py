@@ -18,6 +18,7 @@ The script:
 """
 
 import argparse
+import html
 import json
 import os
 import sys
@@ -102,6 +103,10 @@ class BackupAssigner:
 
         bookings = {}
         for record in data:
+            # FileMaker API encodes HTML entities (e.g. "'" as "&#39;").
+            # Decode at the boundary so backup-event titles show plain text.
+            record = {k: html.unescape(v) if isinstance(v, str) else v
+                      for k, v in record.items()}
             date_str = record.get('event_date', '')
             dj_full = record.get('assigned_dj', '')
             venue = record.get('venue_name', '')

@@ -12,6 +12,7 @@ Usage:
 """
 
 import argparse
+import html
 import requests
 import sys
 import time
@@ -53,6 +54,10 @@ def fetch_all_bookings(start_date, end_date):
             if response.status_code == 200:
                 results = response.json()
                 for booking in results:
+                    # FileMaker API encodes HTML entities (e.g. "'" as "&#39;").
+                    # Decode at the boundary so sheet rows show plain text.
+                    booking = {k: html.unescape(v) if isinstance(v, str) else v
+                               for k, v in booking.items()}
                     key = (
                         booking.get('event_date', ''),
                         booking.get('venue_name', ''),
