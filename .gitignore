@@ -14,6 +14,7 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
 *.egg-info/
 dist/
 build/
@@ -37,6 +38,10 @@ htmlcov/
 
 # === Generated output ===
 output/*.html
+* - Systems crosscheck.txt
+
+# === Local backups ===
+*.bak
 
 # === Personal Notes (optional) ===
 NOTES.md
