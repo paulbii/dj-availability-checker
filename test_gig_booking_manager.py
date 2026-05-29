@@ -28,6 +28,7 @@ from gig_booking_manager import (
     increment_tba,
     # Parsing
     parse_booking_data,
+    normalize_event_type,
     # Time calculations
     calculate_arrival_offset,
     convert_times_to_24h,
@@ -152,6 +153,28 @@ class TestClientNameExtraction(unittest.TestCase):
 # =============================================================================
 # TBA Parsing & Increment Tests
 # =============================================================================
+
+class TestEventTypeNormalization(unittest.TestCase):
+    """Map FileMaker event types to valid inquiry-form dropdown values."""
+
+    def test_known_types_pass_through(self):
+        self.assertEqual(normalize_event_type("Wedding"), "Wedding")
+        self.assertEqual(normalize_event_type("Corporate"), "Corporate")
+        self.assertEqual(normalize_event_type("Bar/Bat Mitzvah"), "Bar/Bat Mitzvah")
+        self.assertEqual(normalize_event_type("High School"), "High School")
+
+    def test_unselected_and_blank_become_unknown(self):
+        self.assertEqual(normalize_event_type("Unselected"), "Unknown")
+        self.assertEqual(normalize_event_type(""), "Unknown")
+        self.assertEqual(normalize_event_type("  "), "Unknown")
+        self.assertEqual(normalize_event_type(None), "Unknown")
+
+    def test_whitespace_trimmed(self):
+        self.assertEqual(normalize_event_type("  Corporate  "), "Corporate")
+
+    def test_unexpected_value_becomes_unknown(self):
+        self.assertEqual(normalize_event_type("School"), "Unknown")
+
 
 class TestTBAParsing(unittest.TestCase):
     """Test TBA column value parsing and incrementing."""
@@ -725,7 +748,7 @@ class TestDryRunFlow(unittest.TestCase):
         }
         path = self._write_json(data)
         try:
-            manager = GigBookingManager(dry_run=True)
+            manager = GigBookingManager(dry_run=True, test_mode=True)
             success = manager.run(path)
             self.assertTrue(success)
 
@@ -750,7 +773,7 @@ class TestDryRunFlow(unittest.TestCase):
         }
         path = self._write_json(data)
         try:
-            manager = GigBookingManager(dry_run=True)
+            manager = GigBookingManager(dry_run=True, test_mode=True)
             # Pre-populate Paul's cell with BOOKED
             manager.sheets.set_mock_row(2026, 5, {
                 "Henry": "", "Woody": "", "Paul": "BOOKED",
@@ -776,7 +799,7 @@ class TestDryRunFlow(unittest.TestCase):
         }
         path = self._write_json(data)
         try:
-            manager = GigBookingManager(dry_run=True)
+            manager = GigBookingManager(dry_run=True, test_mode=True)
             success = manager.run(path)
             self.assertTrue(success)
 
@@ -801,7 +824,7 @@ class TestDryRunFlow(unittest.TestCase):
         }
         path = self._write_json(data)
         try:
-            manager = GigBookingManager(dry_run=True)
+            manager = GigBookingManager(dry_run=True, test_mode=True)
             # TBA already has one booking
             manager.sheets.set_mock_row(2026, 5, {
                 "Henry": "", "Woody": "", "Paul": "",

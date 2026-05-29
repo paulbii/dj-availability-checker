@@ -76,7 +76,23 @@ FORM_FIELDS = {
     "decision_date": "entry.1777773709",
     "venue": "entry.2004165625",
     "status": "entry.918038989",
+    "event_type": "entry.202193973",
 }
+
+# Event Type dropdown options on the inquiry-tracker form. FileMaker's Type
+# field shares this vocabulary, except its empty default ("Unselected") and any
+# value not in this set, which we normalize to "Unknown" so the prefill always
+# matches a real dropdown option.
+FORM_EVENT_TYPES = {
+    "Wedding", "Anniversary", "Bar/Bat Mitzvah", "Birthday", "College",
+    "Community", "Corporate", "High School", "Holiday", "Other", "Unknown",
+}
+
+
+def normalize_event_type(raw):
+    """Map a FileMaker event type to a valid form dropdown value."""
+    value = (raw or "").strip()
+    return value if value in FORM_EVENT_TYPES else "Unknown"
 
 # Default credentials path — override with --credentials flag
 DEFAULT_CREDENTIALS_PATH = os.path.join(
@@ -1020,12 +1036,13 @@ def show_notification(title, message):
 def open_booking_log_form(booking):
     """
     Open the Google Form for booking log with known fields pre-filled.
-    Pre-fills: event date, decision date (today), venue, status (Booked).
-    User completes the remaining fields manually.
+    Pre-fills: event date, decision date (today), venue, status (Booked),
+    event type (from FileMaker). User completes the remaining fields manually.
     """
     event_date = booking["date"].strftime("%-m-%-d-%y")    # e.g., "10-24-26"
     decision_date = datetime.now().strftime("%-m-%-d-%y")   # today
     venue = booking["venue_name"]
+    event_type = normalize_event_type(booking.get("event_type", ""))
 
     params = (
         f"?usp=pp_url"
@@ -1033,6 +1050,7 @@ def open_booking_log_form(booking):
         f"&{FORM_FIELDS['decision_date']}={quote(decision_date)}"
         f"&{FORM_FIELDS['venue']}={quote(venue)}"
         f"&{FORM_FIELDS['status']}={quote('Booked')}"
+        f"&{FORM_FIELDS['event_type']}={quote(event_type)}"
     )
     url = BOOKING_LOG_FORM_URL + params
     webbrowser.open(url)
@@ -1136,9 +1154,12 @@ class GigBookingManager:
         self.credentials_path = credentials_path or DEFAULT_CREDENTIALS_PATH
         self.actions = []  # Track what happened for summary
 
-        # Always use real SheetsClient for reads, even in dry-run
-        # Dry-run flag prevents writes but allows reads
-        self.sheets = SheetsClient(self.credentials_path)
+        # Dry-run reads the live sheet but skips writes. Test mode swaps in an
+        # in-memory client so the suite never touches Google Sheets.
+        if test_mode:
+            self.sheets = MockSheetsClient()
+        else:
+            self.sheets = SheetsClient(self.credentials_path)
 
     def log(self, action):
         """Log an action for the summary."""
@@ -1413,7 +1434,7 @@ class GigBookingManager:
             if allow_multiple:
                 # Increment existing BOOKED value
                 new_value = increment_booked(current_value)
-                if self.dry_run:
+                if self.dry_run and not self.test_mode:
                     print(f"  [DRY RUN] Would write '{new_value}' to row {row_num}, col {col_num} in {year} sheet")
                 else:
                     self.sheets.write_cell(row_num, col_num, new_value, year)
@@ -1421,7 +1442,7 @@ class GigBookingManager:
                 row_data[dj_short] = new_value  # Update local copy
             else:
                 # First booking - write BOOKED (overwrites RESERVED if present)
-                if self.dry_run:
+                if self.dry_run and not self.test_mode:
                     print(f"  [DRY RUN] Would write 'BOOKED' to row {row_num}, col {col_num} in {year} sheet")
                 else:
                     self.sheets.write_cell(row_num, col_num, "BOOKED", year)
@@ -1448,7 +1469,7 @@ class GigBookingManager:
             tba_col = col_map["TBA"]
             current_tba = row_data.get("TBA", "")
             new_tba = increment_tba(current_tba)
-            if self.dry_run:
+            if self.dry_run and not self.test_mode:
                 print(f"  [DRY RUN] Would write '{new_tba}' to row {row_num}, col {tba_col} in {year} sheet")
             else:
                 self.sheets.write_cell(row_num, tba_col, new_tba, year)
@@ -1546,7 +1567,7 @@ class GigBookingManager:
                         new_backup_val = f"{current_backup_val}, BACKUP"
                     else:
                         new_backup_val = "BACKUP"
-                    if self.dry_run:
+                    if self.dry_run and not self.test_mode:
                         print(f"  [DRY RUN] Would write '{new_backup_val}' to row {row_num}, col {backup_col} in {year} sheet")
                     else:
                         self.sheets.write_cell(row_num, backup_col, new_backup_val, year)
@@ -1615,7 +1636,8 @@ class GigBookingManager:
         # -----------------------------------------------------------------
         # Phase 5: Schedule nurture emails
         # -----------------------------------------------------------------
-        self._schedule_nurture_emails(booking)
+        if not self.test_mode:
+            self._schedule_nurture_emails(booking)
 
         # =================================================================
         # Summary
@@ -1628,11 +1650,12 @@ class GigBookingManager:
         print()
 
         # Open pre-filled booking log form (safe in dry-run — nothing submits until user clicks)
-        print("— Opening booking log form...")
-        form_url = open_booking_log_form(booking)
-        self.log("Booking log: form opened in browser")
-        print(f"  ✓ Pre-filled form opened — complete remaining fields")
-        print()
+        if not self.test_mode:
+            print("— Opening booking log form...")
+            open_booking_log_form(booking)
+            self.log("Booking log: form opened in browser")
+            print(f"  ✓ Pre-filled form opened — complete remaining fields")
+            print()
 
         # Show notification (production only)
         if not self.dry_run:
