@@ -41,6 +41,7 @@ from gig_booking_manager import (
     SheetsClient,
     DEFAULT_CREDENTIALS_PATH,
     parse_booking_data,
+    normalize_event_type,
     show_warning_dialog,
     get_backup_title,
     extract_client_first_names,
@@ -143,6 +144,7 @@ def open_cancel_form(booking):
     event_date = booking["date"].strftime("%-m-%-d-%y")
     decision_date = datetime.now().strftime("%-m-%-d-%y")
     venue = booking["venue_name"]
+    event_type = normalize_event_type(booking.get("event_type", ""))
 
     params = (
         f"?usp=pp_url"
@@ -150,6 +152,7 @@ def open_cancel_form(booking):
         f"&{FORM_FIELDS['decision_date']}={quote(decision_date)}"
         f"&{FORM_FIELDS['venue']}={quote(venue)}"
         f"&{FORM_FIELDS['status']}={quote('Canceled')}"
+        f"&{FORM_FIELDS['event_type']}={quote(event_type)}"
     )
     url = BOOKING_LOG_FORM_URL + params
     webbrowser.open(url)
