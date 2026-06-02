@@ -72,7 +72,7 @@ def is_unavailable_2027(row):
     The cap is 2: one slot is held for AAG, one for tier-1 venues
     (Little Hills, Nestldown, Fogarty, etc.). Counting:
       - booked_count = real events (BOOKED, RESERVED on a DJ, WEDFAIRE,
-        AAG-as-event, STANFORD). Does NOT include OUT or MAXED.
+        SETUP, AAG-as-event, STANFORD). Does NOT include OUT or MAXED.
       - +1 if AAG column says RESERVED (the held AAG slot).
     """
     booked_count = row["availability"].get("booked_count", 0)

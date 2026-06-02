@@ -150,7 +150,7 @@ BACKUP_ELIGIBLE_DJS = {
 # unavailable and warns — preventing typos from silently counting as "available".
 KNOWN_CELL_VALUES = {
     "booked", "backup", "out", "maxed", "reserved", "stanford",
-    "ok", "ok to backup", "dad", "last", "aag", "wedfaire",
+    "ok", "ok to backup", "dad", "last", "aag", "wedfaire", "setup",
 }
 
 
@@ -538,12 +538,12 @@ def get_bulk_availability_data(year, service, spreadsheet, spreadsheet_id, start
                 # Handle compound statuses like "BOOKED, BACKUP"
                 statuses = [s.strip() for s in value_lower.split(',')]
 
-                if 'booked' in statuses or 'wedfaire' in statuses:
+                if 'booked' in statuses or 'wedfaire' in statuses or 'setup' in statuses:
                     booked_djs.append(dj_name)
                 if 'backup' in statuses:
                     backup_assigned.append(dj_name)
 
-                if 'booked' in statuses or 'backup' in statuses or 'wedfaire' in statuses:
+                if 'booked' in statuses or 'backup' in statuses or 'wedfaire' in statuses or 'setup' in statuses:
                     pass  # Already handled above
                 elif value_lower == "reserved":
                     # Stephanie can have RESERVED status
@@ -913,7 +913,7 @@ def check_dj_availability(dj_name, value, date_obj=None, is_bold=False, year=Non
         if value_lower == "out":
             return False, False  # Normal OUT rules apply
     
-    if value_lower == "booked" or value_lower == "backup" or value_lower == "wedfaire":
+    if value_lower == "booked" or value_lower == "backup" or value_lower == "wedfaire" or value_lower == "setup":
         return False, False
 
     # Handle RESERVED and STANFORD status (treated as booked)
@@ -1019,7 +1019,7 @@ def analyze_availability(selected_data, date_obj, year=None):
             
             continue
             
-        if value_lower == "booked" or "aag" in value_lower or value_lower == "stanford" or value_lower == "wedfaire":
+        if value_lower == "booked" or "aag" in value_lower or value_lower == "stanford" or value_lower == "wedfaire" or value_lower == "setup":
             booked_count += 1
     
     # Second pass: analyze availability
@@ -1035,7 +1035,7 @@ def analyze_availability(selected_data, date_obj, year=None):
         if value_lower == "backup":
             backup_count += 1
         # Only check availability for non-booked and non-backup DJs
-        elif value_lower != "booked" and value_lower != "stanford" and value_lower != "wedfaire":
+        elif value_lower != "booked" and value_lower != "stanford" and value_lower != "wedfaire" and value_lower != "setup":
             can_book, can_backup = check_dj_availability(name, value, date_obj, is_bold, year, warn=False)
             if can_book:
                 available_for_booking.append(name)

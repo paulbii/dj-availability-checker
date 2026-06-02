@@ -44,6 +44,7 @@ from gig_booking_manager import (
     GigBookingManager,
     COLUMN_MAPS,
 )
+from dj_core import check_dj_availability, KNOWN_CELL_VALUES
 
 
 # =============================================================================
@@ -503,6 +504,40 @@ class TestSpotsRemaining(unittest.TestCase):
 # =============================================================================
 # Existing Backup Check Tests
 # =============================================================================
+
+class TestSetupStatus(unittest.TestCase):
+    """SETUP = setup/rehearsal commitment. Recognized value, treated as committed
+    (DJ unavailable, not backup-eligible), the same way WEDFAIRE is."""
+
+    SAT = datetime(2026, 2, 21)   # Saturday
+
+    def test_setup_is_known_value(self):
+        # Must be recognized so it doesn't warn or fall through to permissive defaults.
+        self.assertIn("setup", KNOWN_CELL_VALUES)
+
+    def test_setup_not_backup_eligible_woody(self):
+        # A DJ doing a setup is committed; cannot also be a backup.
+        ok, note = can_backup("Woody", "SETUP", False, self.SAT, 2026)
+        self.assertFalse(ok)
+
+    def test_setup_not_backup_eligible_paul(self):
+        ok, note = can_backup("Paul", "SETUP", False, self.SAT, 2026)
+        self.assertFalse(ok)
+
+    def test_setup_not_available_to_book(self):
+        # check_dj_availability: a setup DJ can neither be booked nor be backup.
+        can_book, can_bkup = check_dj_availability("Woody", "SETUP", self.SAT, False, "2026")
+        self.assertEqual((can_book, can_bkup), (False, False))
+
+    def test_setup_consumes_capacity(self):
+        # A setup ties up the DJ, so it reduces available spots like any commitment.
+        row_data = {
+            "Henry": "", "Woody": "SETUP", "Paul": "", "Stefano": "",
+            "Felipe": "", "TBA": "",
+        }
+        # Henry + Paul available = 2 (Woody committed to setup).
+        self.assertEqual(calculate_spots_remaining(row_data, 2026), 2)
+
 
 class TestExistingBackup(unittest.TestCase):
 

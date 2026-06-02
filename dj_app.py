@@ -51,7 +51,7 @@ def format_dj_status_for_display(dj_name, value, date_obj, year, gig_booking=Non
         venue = gig_booking.get('venue', '')
         text = f":red[BOOKED ({venue})]"
         # Warn if matrix doesn't match
-        if clean_lower != "booked" and clean_lower != "wedfaire":
+        if clean_lower != "booked" and clean_lower != "wedfaire" and clean_lower != "setup":
             if clean_value:
                 text += f"  :orange[⚠️ matrix shows \"{clean_value}\"]"
             else:
@@ -85,6 +85,10 @@ def format_dj_status_for_display(dj_name, value, date_obj, year, gig_booking=Non
     # Check for WEDFAIRE status
     if value and value_lower == "wedfaire":
         return f":red[WEDFAIRE]"
+
+    # Check for SETUP status (committed, but a setup/rehearsal, not a paid booking)
+    if value and value_lower == "setup":
+        return f":orange[SETUP]"
 
     # Check for booked status
     if value and "booked" in value_lower:
@@ -570,7 +574,7 @@ def tab_dj_availability(year, service, spreadsheet, spreadsheet_id):
             clean_value = str(value).replace(" (BOLD)", "") if value else ""
             vl = clean_value.lower()
 
-            if "booked" in vl or vl == "stanford" or vl == "reserved" or vl == "wedfaire":
+            if "booked" in vl or vl == "stanford" or vl == "reserved" or vl == "wedfaire" or vl == "setup":
                 booked_date_infos.append(date_info)
             elif "backup" in vl:
                 backup_dates.append(date_info['date'])
