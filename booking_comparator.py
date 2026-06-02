@@ -6,7 +6,7 @@ Cross-checks up to three booking systems to find discrepancies:
 
   1. Gig Database    — pulled LIVE from bigfundj.com JSON endpoint
   2. Avail Matrix    — pulled LIVE from Google Sheets
-  3. Master Calendar — pulled LIVE via icalBuddy (macOS)
+  3. Master Calendar — pulled LIVE via icalBuddy (macOS); Gigs + Wedding Faires
 
 Usage:
   python3 booking_comparator.py --year 2026
@@ -287,7 +287,9 @@ def fetch_availability_matrix(year):
 def fetch_master_calendar(year):
     """
     Pull master calendar events directly via icalBuddy.
-    Queries the entire year of events.
+    Queries the entire year of events from the Gigs and Wedding Faires
+    calendars. Wedding faires are rare but appear in the Gig DB, so they
+    must be included to avoid false "missing from calendar" mismatches.
     Returns: (bookings, backups) where each is dict of { "M/D": ["DJ1", "DJ2", ...] }
     """
     events = defaultdict(list)
@@ -317,7 +319,7 @@ def fetch_master_calendar(year):
     print(f"  Querying calendar for {year}...")
     try:
         result = subprocess.run(
-            [ical_buddy, "-ic", "Gigs",
+            [ical_buddy, "-ic", "Gigs,Wedding Faires",
              "-eep", "notes,url,location,attendees",
              "-b", "", "-nc", "-nrd",
              "-df", "%m/%d",
