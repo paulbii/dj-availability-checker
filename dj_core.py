@@ -632,6 +632,66 @@ def is_weekend(date_obj):
     return date_obj.weekday() >= 5
 
 
+def ingest_gig_booking(assigned, unassigned, booking):
+    """Parse one gig-db record into the assigned/unassigned structures.
+
+    Mutates `assigned` (dict of DJ short name -> info) and `unassigned` (list).
+    For a SETUP event, both people are tagged with a role so the availability
+    tools can show the soft hold: the primary (assigned_dj) is committed, and a
+    rostered helper (assigned_roadie_or_dj2) could potentially take a paying
+    event. Roadies / non-rostered DJ2 names are skipped. Non-setup events keep
+    the original shape (no role tags, DJ2 not injected here).
+    """
+    full_name = html.unescape(booking.get('assigned_dj', ''))
+    venue = html.unescape(booking.get('venue_name', ''))
+    client = html.unescape(booking.get('client_name', ''))
+
+    if full_name.lower() == 'unassigned':
+        unassigned.append({'venue': venue, 'client': client})
+        return
+
+    event_type = (booking.get('event_type', '') or '').strip()
+    is_setup = event_type.lower() == 'setup'
+
+    first_name = full_name.split()[0].lower() if full_name else ''
+    primary_short = DJ_NAME_MAP.get(first_name)
+    if primary_short:
+        info = {'venue': venue, 'client': client, 'event_type': event_type}
+        if is_setup:
+            info['is_setup'] = True
+            info['role'] = 'primary'
+        assigned[primary_short] = info
+
+    # On a setup, also surface the rostered helper (DJ2) as a soft hold.
+    if is_setup:
+        dj2_full = html.unescape(booking.get('assigned_roadie_or_dj2', ''))
+        h_first = dj2_full.split()[0].lower() if dj2_full else ''
+        helper_short = DJ_NAME_MAP.get(h_first)
+        if helper_short and helper_short != primary_short:
+            assigned[helper_short] = {
+                'venue': venue, 'client': client, 'event_type': event_type,
+                'is_setup': True, 'role': 'helper',
+            }
+
+
+def setup_status_text(gig_booking):
+    """Display text for a SETUP gig booking, including the soft-hold role.
+
+    Returns None when the booking isn't a setup, so callers fall back to their
+    normal BOOKED rendering. Each surface adds its own coloring.
+    """
+    if not gig_booking or not gig_booking.get('is_setup'):
+        return None
+    venue = gig_booking.get('venue', '')
+    base = f"SETUP ({venue})" if venue else "SETUP"
+    role = gig_booking.get('role')
+    if role == 'helper':
+        return f"{base} — helper, could take a paying event (review)"
+    if role == 'primary':
+        return f"{base} — primary, committed"
+    return base
+
+
 def get_gig_database_bookings(year, month_day):
     """
     Query the gig database API for bookings on a specific date.
@@ -667,28 +727,9 @@ def get_gig_database_bookings(year, month_day):
         # Map API results to short DJ names
         assigned = {}
         unassigned = []
-        
+
         for booking in bookings:
-            full_name = html.unescape(booking.get('assigned_dj', ''))
-            venue = html.unescape(booking.get('venue_name', ''))
-            client = html.unescape(booking.get('client_name', ''))
-
-            # Check for unassigned bookings
-            if full_name.lower() == 'unassigned':
-                unassigned.append({
-                    'venue': venue,
-                    'client': client
-                })
-            else:
-                # Extract first name and map to short name
-                first_name = full_name.split()[0].lower() if full_name else ''
-                short_name = DJ_NAME_MAP.get(first_name)
-
-                if short_name:
-                    assigned[short_name] = {
-                        'venue': venue,
-                        'client': client
-                    }
+            ingest_gig_booking(assigned, unassigned, booking)
 
         return {'assigned': assigned, 'unassigned': unassigned}
         
@@ -754,28 +795,13 @@ def get_gig_database_bookings_multiday(year, month_day):
             # Initialize date entry if needed
             if date_key not in bookings_by_date:
                 bookings_by_date[date_key] = {'assigned': {}, 'unassigned': []}
-            
-            full_name = html.unescape(booking.get('assigned_dj', ''))
-            venue = html.unescape(booking.get('venue_name', ''))
-            client = html.unescape(booking.get('client_name', ''))
 
-            # Check for unassigned bookings
-            if full_name.lower() == 'unassigned':
-                bookings_by_date[date_key]['unassigned'].append({
-                    'venue': venue,
-                    'client': client
-                })
-            else:
-                # Extract first name and map to short name
-                first_name = full_name.split()[0].lower() if full_name else ''
-                short_name = DJ_NAME_MAP.get(first_name)
-                
-                if short_name:
-                    bookings_by_date[date_key]['assigned'][short_name] = {
-                        'venue': venue,
-                        'client': client
-                    }
-        
+            ingest_gig_booking(
+                bookings_by_date[date_key]['assigned'],
+                bookings_by_date[date_key]['unassigned'],
+                booking,
+            )
+
         return bookings_by_date
         
     except Exception:

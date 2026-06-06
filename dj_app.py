@@ -22,6 +22,7 @@ from dj_core import (
     get_bulk_availability_data,
     auto_clear_stale_cache,
     get_gig_database_bookings,
+    setup_status_text,
     KNOWN_CELL_VALUES,
 )
 
@@ -48,6 +49,18 @@ def format_dj_status_for_display(dj_name, value, date_obj, year, gig_booking=Non
 
     # If we have gig database info, show venue
     if gig_booking:
+        setup_text = setup_status_text(gig_booking)
+        if setup_text:
+            # Setup soft-hold: helper stands out (violet) since they could take a
+            # paying event; primary is committed (orange).
+            color = "violet" if gig_booking.get('role') == 'helper' else "orange"
+            text = f":{color}[{setup_text}]"
+            if clean_lower != "setup":
+                if clean_value:
+                    text += f"  :orange[⚠️ matrix shows \"{clean_value}\"]"
+                else:
+                    text += f"  :orange[⚠️ matrix is blank]"
+            return text
         venue = gig_booking.get('venue', '')
         text = f":red[BOOKED ({venue})]"
         # Warn if matrix doesn't match
