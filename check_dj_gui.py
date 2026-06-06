@@ -27,6 +27,7 @@ from dj_core import (
     auto_clear_stale_cache,
     KNOWN_CELL_VALUES,
     get_gig_database_bookings,
+    setup_status_text,
 )
 
 
@@ -883,6 +884,18 @@ class Api:
         clean_lower = clean_value.lower()
 
         if gig_booking:
+            setup_text = setup_status_text(gig_booking)
+            if setup_text:
+                # Setup soft-hold: helper stands out (cyan) since they could be
+                # pulled for a paying event; primary is committed (yellow).
+                cls = "cyan" if gig_booking.get('role') == 'helper' else "yellow"
+                t = f"{dj_name}: {setup_text}"
+                if clean_lower != "setup":
+                    if clean_value:
+                        t += f'  ⚠️  matrix shows "{clean_value}"'
+                    else:
+                        t += "  ⚠️  matrix is blank"
+                return {"text": t, "cls": cls}
             venue = gig_booking.get('venue', '')
             t = f"{dj_name}: BOOKED ({venue})"
             if clean_lower != "booked" and clean_lower != "wedfaire" and clean_lower != "setup":
