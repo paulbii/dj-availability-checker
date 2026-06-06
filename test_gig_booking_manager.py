@@ -34,6 +34,7 @@ from gig_booking_manager import (
     setup_matrix_value,
     primary_event_title,
     setup_helper_short,
+    setup_event_bracket,
     # Time calculations
     calculate_arrival_offset,
     convert_times_to_24h,
@@ -619,6 +620,17 @@ class TestSetupBookingWrite(unittest.TestCase):
         # Both DJs in the bracket so the calendar cross-check sees both.
         self.assertEqual(primary_event_title(booking),
                          "[WM/PB] The Sobrato Organization Setup")
+
+    def test_setup_event_bracket(self):
+        two_person = {
+            "dj_initials": "WM", "dj_initials_bracket": "[WM]",
+            "event_type": "Setup", "dj2_full_name": "Paul Burchfield",
+        }
+        self.assertEqual(setup_event_bracket(two_person), "[WM/PB]")
+        solo = {**two_person, "dj2_full_name": ""}
+        self.assertEqual(setup_event_bracket(solo), "[WM]")
+        non_setup = {**two_person, "event_type": "Wedding"}
+        self.assertEqual(setup_event_bracket(non_setup), "[WM]")
 
     def test_two_person_setup_marks_both_in_matrix(self):
         data = {

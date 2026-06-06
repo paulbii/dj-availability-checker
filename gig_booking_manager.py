@@ -133,6 +133,16 @@ def setup_helper_short(booking):
     return short if short in DJ_EMAILS else None
 
 
+def setup_event_bracket(booking):
+    """Calendar title bracket for a booking: '[DJ1/DJ2]' for a 2-person setup,
+    else the primary's '[DJ1]'. Shared by title-building and cancellation so the
+    bracket that gets created is the same one that gets deleted."""
+    helper = setup_helper_short(booking)
+    if helper:
+        return f"[{booking['dj_initials']}/{get_dj_initials(helper)}]"
+    return booking["dj_initials_bracket"]
+
+
 def primary_event_title(booking):
     """Build the primary calendar event title: '[XX] Client'.
 
@@ -142,12 +152,7 @@ def primary_event_title(booking):
     involved. Single source of truth so the dry-run preview and the real
     calendar write can't diverge.
     """
-    helper = setup_helper_short(booking)
-    if helper:
-        bracket = f"[{booking['dj_initials']}/{get_dj_initials(helper)}]"
-    else:
-        bracket = booking["dj_initials_bracket"]
-    title = f"{bracket} {booking['client_display']}"
+    title = f"{setup_event_bracket(booking)} {booking['client_display']}"
     if is_setup_booking(booking) and "setup" not in booking["client_display"].lower():
         title += " Setup"
     if booking["has_planner"]:

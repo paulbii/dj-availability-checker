@@ -45,6 +45,9 @@ from gig_booking_manager import (
     show_warning_dialog,
     get_backup_title,
     extract_client_first_names,
+    is_setup_booking,
+    setup_helper_short,
+    setup_event_bracket,
 )
 
 
@@ -222,7 +225,10 @@ class BookingCanceller:
         date_obj = booking["date"]
         year = booking["year"]
         dj_name = booking["dj_short_name"]
-        initials_bracket = booking["dj_initials_bracket"]
+        is_setup = is_setup_booking(booking)
+        # For a 2-person setup the calendar title is [DJ1/DJ2]; match that exact
+        # bracket so the event actually gets deleted (a plain [DJ1] won't match).
+        initials_bracket = setup_event_bracket(booking)
         date_display = booking["date_display"]
         venue = booking["venue_name"]
         client = booking["client_display"]
@@ -260,10 +266,11 @@ class BookingCanceller:
         current_val = (row_data.get(dj_name, "") or "").strip()
         current_lower = current_val.lower()
 
-        if "booked" not in current_lower and "reserved" not in current_lower and "wedfaire" not in current_lower:
+        if ("booked" not in current_lower and "reserved" not in current_lower
+                and "wedfaire" not in current_lower and "setup" not in current_lower):
             msg = (
                 f"{dj_name}'s cell on {date_display} shows \"{current_val}\" "
-                f"(expected BOOKED, RESERVED, or WEDFAIRE)."
+                f"(expected BOOKED, RESERVED, WEDFAIRE, or SETUP)."
             )
             print(f"  WARNING: {msg}")
             if not self.dry_run:
@@ -289,6 +296,25 @@ class BookingCanceller:
             self.sheets.write_cell(row_num, col_num, default_val, year)
             print(f"  ✓ {dj_name} → {display_val}")
             self.log(f"Matrix: restored {dj_name} to {display_val}")
+
+        # On a 2-person setup, also clear the helper's SETUP cell.
+        if is_setup:
+            helper = setup_helper_short(booking)
+            if helper and helper in col_map and helper != dj_name:
+                helper_current = (row_data.get(helper, "") or "").strip()
+                if "setup" in helper_current.lower():
+                    helper_col = col_map[helper]
+                    helper_default = get_default_cell_value(helper, date_obj)
+                    helper_display = f'"{helper_default}"' if helper_default else "(blank)"
+                    if self.dry_run:
+                        print(f"  [DRY RUN] Would set helper {helper} to {helper_display}")
+                        self.log(f"Matrix: would restore helper {helper} to {helper_display}")
+                    else:
+                        self.sheets.write_cell(row_num, helper_col, helper_default, year)
+                        print(f"  ✓ {helper} → {helper_display} (setup helper)")
+                        self.log(f"Matrix: restored helper {helper} to {helper_display}")
+                else:
+                    print(f"  ℹ️  Helper {helper} cell is \"{helper_current}\" (not SETUP) — left as is")
 
         # Handle backup DJ
         remove_backup = False
@@ -346,15 +372,21 @@ class BookingCanceller:
         print()
 
         # ── Open Google Form ──
-        print("  Opening booking log form (Canceled)...")
-        if self.dry_run:
-            event_date = booking["date"].strftime("%-m-%-d-%y")
-            print(f"  [DRY RUN] Would open form: date={event_date}, venue={venue}, status=Canceled")
-            self.log("Form: would open with Canceled status")
+        # A setup was never an inquiry/booking in the tracker (gig_booking_manager
+        # skips the form for setups), so don't log a bogus "Canceled" row for one.
+        if is_setup:
+            print("  Skipping booking log form (setup — not an inquiry/booking)")
+            self.log("Form: skipped (setup)")
         else:
-            url = open_cancel_form(booking)
-            self.log("Form: opened with Canceled status")
-            print("  ✓ Form opened in browser")
+            print("  Opening booking log form (Canceled)...")
+            if self.dry_run:
+                event_date = booking["date"].strftime("%-m-%-d-%y")
+                print(f"  [DRY RUN] Would open form: date={event_date}, venue={venue}, status=Canceled")
+                self.log("Form: would open with Canceled status")
+            else:
+                url = open_cancel_form(booking)
+                self.log("Form: opened with Canceled status")
+                print("  ✓ Form opened in browser")
 
         # ── Summary ──
         print()
