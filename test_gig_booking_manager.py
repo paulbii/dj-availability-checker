@@ -29,6 +29,11 @@ from gig_booking_manager import (
     # Parsing
     parse_booking_data,
     normalize_event_type,
+    # Setup handling
+    is_setup_booking,
+    setup_matrix_value,
+    primary_event_title,
+    setup_helper_short,
     # Time calculations
     calculate_arrival_offset,
     convert_times_to_24h,
@@ -537,6 +542,151 @@ class TestSetupStatus(unittest.TestCase):
         }
         # Henry + Paul available = 2 (Woody committed to setup).
         self.assertEqual(calculate_spots_remaining(row_data, 2026), 2)
+
+
+class TestSetupBookingWrite(unittest.TestCase):
+    """gig_booking_manager handling of Setup-type events: write SETUP (not
+    BOOKED) to the matrix, skip the backup assessment, label the calendar."""
+
+    def test_is_setup_booking(self):
+        self.assertTrue(is_setup_booking({"event_type": "Setup"}))
+        self.assertTrue(is_setup_booking({"event_type": "setup"}))
+        self.assertTrue(is_setup_booking({"event_type": "  SETUP "}))
+        self.assertFalse(is_setup_booking({"event_type": "Wedding"}))
+        self.assertFalse(is_setup_booking({"event_type": ""}))
+        self.assertFalse(is_setup_booking({}))
+
+    def test_setup_matrix_value(self):
+        self.assertEqual(setup_matrix_value(""), "SETUP")
+        self.assertEqual(setup_matrix_value("BOOKED"), "BOOKED, SETUP")
+        self.assertEqual(setup_matrix_value("DAD"), "DAD, SETUP")
+        # Idempotent — never double up.
+        self.assertEqual(setup_matrix_value("SETUP"), "SETUP")
+        self.assertEqual(setup_matrix_value("BOOKED, SETUP"), "BOOKED, SETUP")
+
+    def test_primary_event_title(self):
+        base = {
+            "dj_initials_bracket": "[WM]",
+            "client_display": "The Sobrato Organization",
+            "has_planner": False,
+        }
+        wedding = {**base, "event_type": "Wedding", "client_display": "Amy and Joe"}
+        self.assertEqual(primary_event_title(wedding), "[WM] Amy and Joe")
+
+        setup = {**base, "event_type": "Setup"}
+        self.assertEqual(primary_event_title(setup),
+                         "[WM] The Sobrato Organization Setup")
+
+        # Don't double the word if the client name already carries it.
+        already = {**base, "event_type": "Setup",
+                   "client_display": "Sobrato Family Event Setup"}
+        self.assertEqual(primary_event_title(already),
+                         "[WM] Sobrato Family Event Setup")
+
+        # Planner suffix still applies.
+        with_planner = {**setup, "has_planner": True}
+        self.assertEqual(primary_event_title(with_planner),
+                         "[WM] The Sobrato Organization Setup (planner)")
+
+    def test_setup_helper_short(self):
+        # Rostered co-DJ in the DJ2 slot -> returned as the helper.
+        self.assertEqual(
+            setup_helper_short({"event_type": "Setup",
+                                "dj2_full_name": "Paul Burchfield"}), "Paul")
+        self.assertEqual(
+            setup_helper_short({"event_type": "Setup",
+                                "dj2_full_name": "Henry S. Kim"}), "Henry")
+        # Roadie / non-rostered name -> not a helper.
+        self.assertIsNone(
+            setup_helper_short({"event_type": "Setup",
+                                "dj2_full_name": "Ryan Roadie"}))
+        # Empty DJ2, or not a setup at all -> None.
+        self.assertIsNone(
+            setup_helper_short({"event_type": "Setup", "dj2_full_name": ""}))
+        self.assertIsNone(
+            setup_helper_short({"event_type": "Wedding",
+                                "dj2_full_name": "Paul Burchfield"}))
+
+    def test_primary_event_title_two_person_setup(self):
+        booking = {
+            "dj_initials_bracket": "[WM]",
+            "dj_initials": "WM",
+            "client_display": "The Sobrato Organization",
+            "has_planner": False,
+            "event_type": "Setup",
+            "dj2_full_name": "Paul Burchfield",
+        }
+        # Both DJs in the bracket so the calendar cross-check sees both.
+        self.assertEqual(primary_event_title(booking),
+                         "[WM/PB] The Sobrato Organization Setup")
+
+    def test_two_person_setup_marks_both_in_matrix(self):
+        data = {
+            "event_date": "2026-11-18",
+            "client_name": "Sobrato Family Event Setup",
+            "assigned_dj": "Woody Miraglia",
+            "assigned_roadie_or_dj2": "Paul Burchfield",
+            "venue_name": "Sobrato Development Property",
+            "setup_time": "4:00",
+            "clear_time": "10:00",
+            "sound_type": "Standard Speakers",
+            "has_ceremony_sound": False,
+            "event_type": "Setup",
+        }
+        fd, path = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f)
+        try:
+            manager = GigBookingManager(dry_run=True, test_mode=True)
+            success = manager.run(path)
+            self.assertTrue(success)
+            by_col = {w["col"]: w["value"] for w in manager.sheets.writes}
+            self.assertEqual(by_col.get(COLUMN_MAPS[2026]["Woody"]), "SETUP")
+            self.assertEqual(by_col.get(COLUMN_MAPS[2026]["Paul"]), "SETUP")
+            # No BOOKED, no BACKUP anywhere.
+            vals = list(by_col.values())
+            self.assertNotIn("BOOKED", vals)
+            self.assertNotIn("BACKUP", vals)
+        finally:
+            os.unlink(path)
+
+    def test_setup_booking_writes_SETUP_and_skips_backup(self):
+        import contextlib
+        import io as _io
+
+        data = {
+            "event_date": "2026-11-18",
+            "client_name": "Sobrato Family Event Setup",
+            "assigned_dj": "Paul Burchfield",
+            "venue_name": "Sobrato Development Property",
+            "setup_time": "4:00",
+            "clear_time": "10:00",
+            "sound_type": "Standard Speakers",
+            "has_ceremony_sound": False,
+            "event_type": "Setup",
+        }
+        fd, path = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f)
+        try:
+            manager = GigBookingManager(dry_run=True, test_mode=True)
+            buf = _io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                success = manager.run(path)
+            out = buf.getvalue()
+
+            self.assertTrue(success)
+            # Matrix gets SETUP, never BOOKED, and no BACKUP is written.
+            values = [w["value"] for w in manager.sheets.writes]
+            self.assertEqual(values, ["SETUP"])
+            self.assertNotIn("BOOKED", values)
+            self.assertNotIn("BACKUP", values)
+            # Backup assessment is skipped for setups.
+            self.assertNotIn("Backup assessment", out)
+            # Setups are not bookings, so the inquiry-tracker form is skipped.
+            self.assertIn("Skipping booking log form", out)
+        finally:
+            os.unlink(path)
 
 
 class TestExistingBackup(unittest.TestCase):

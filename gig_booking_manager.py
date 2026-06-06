@@ -94,6 +94,66 @@ def normalize_event_type(raw):
     value = (raw or "").strip()
     return value if value in FORM_EVENT_TYPES else "Unknown"
 
+
+def is_setup_booking(booking):
+    """True when the booking is a setup/rehearsal day (Event Type = Setup).
+
+    A setup is a resource commitment, not a sale: it gets SETUP in the matrix
+    (not BOOKED), no backup, and a Setup-labeled calendar event.
+    """
+    return booking.get("event_type", "").strip().lower() == "setup"
+
+
+def setup_matrix_value(current_value):
+    """The matrix cell value when writing a setup commitment.
+
+    Blank cell → 'SETUP'. A cell with an existing value keeps it and appends
+    ', SETUP' (e.g. 'DAD' → 'DAD, SETUP'), parallel to how backups are written.
+    Idempotent: never adds a second SETUP.
+    """
+    current = (current_value or "").strip()
+    if not current:
+        return "SETUP"
+    parts = [p.strip() for p in current.split(",") if p.strip()]
+    if any(p.upper() == "SETUP" for p in parts):
+        return current
+    return f"{current}, SETUP"
+
+
+def setup_helper_short(booking):
+    """The rostered co-DJ ("helper") in the DJ2 slot of a setup, or None.
+
+    Only returns a name for setup events, and only when the DJ2 slot holds a
+    rostered DJ. Roadies / unknown names return None (they aren't tracked in the
+    matrix). Used to mark both people SETUP and to build the [DJ1/DJ2] title.
+    """
+    if not is_setup_booking(booking):
+        return None
+    short = get_dj_short_name(booking.get("dj2_full_name", ""))
+    return short if short in DJ_EMAILS else None
+
+
+def primary_event_title(booking):
+    """Build the primary calendar event title: '[XX] Client'.
+
+    For a 2-person setup, both DJs go in the bracket ('[WM/PB] …') so the
+    calendar cross-check sees both. Appends ' Setup' for setup events (unless the
+    client name already says it) and a ' (planner)' suffix when a planner is
+    involved. Single source of truth so the dry-run preview and the real
+    calendar write can't diverge.
+    """
+    helper = setup_helper_short(booking)
+    if helper:
+        bracket = f"[{booking['dj_initials']}/{get_dj_initials(helper)}]"
+    else:
+        bracket = booking["dj_initials_bracket"]
+    title = f"{bracket} {booking['client_display']}"
+    if is_setup_booking(booking) and "setup" not in booking["client_display"].lower():
+        title += " Setup"
+    if booking["has_planner"]:
+        title += " (planner)"
+    return title
+
 # Default credentials path — override with --credentials flag
 DEFAULT_CREDENTIALS_PATH = os.path.join(
     os.path.expanduser("~"), "Documents", "projects",
@@ -311,7 +371,9 @@ def parse_clean_format(raw):
 
     dj_full = raw.get("assigned_dj", "")
     dj_short = get_dj_short_name(dj_full)
-    dj2 = raw.get("secondary_dj", "")
+    # Henry's feed names the DJ2 slot `assigned_roadie_or_dj2`; older/clean
+    # payloads use `secondary_dj`. Accept either.
+    dj2 = raw.get("assigned_roadie_or_dj2") or raw.get("secondary_dj", "")
 
     if dj_short == "Unassigned":
         dj_initials = get_unassigned_initials(dj2)
@@ -757,10 +819,8 @@ def check_calendar_conflicts(date_obj, initials_bracket):
 
 def create_timed_calendar_event(booking, cal_start, cal_end, test_mode=False):
     """Create the primary timed calendar event via AppleScript."""
-    # Build title: [INITIALS] ClientName (planner)
-    title = f"{booking['dj_initials_bracket']} {booking['client_display']}"
-    if booking["has_planner"]:
-        title += " (planner)"
+    # Build title: [INITIALS] ClientName [Setup] (planner)
+    title = primary_event_title(booking)
 
     # Build location
     location_parts = [booking["venue_name"]]
@@ -1291,10 +1351,13 @@ class GigBookingManager:
         # -----------------------------------------------------------------
         print("— Parsing booking data...")
         booking = parse_booking_data(json_path)
+        is_setup = is_setup_booking(booking)
         print(f"  Date: {booking['date_display']} ({booking['date'].strftime('%Y-%m-%d')})")
         print(f"  DJ: {booking['dj_short_name']} {booking['dj_initials_bracket']}")
         print(f"  Client: {booking['client_display']}")
         print(f"  Venue: {booking['venue_name']}")
+        if is_setup:
+            print(f"  Event type: Setup — matrix SETUP, no backup, Setup calendar label")
         print()
 
         year = booking["year"]
@@ -1431,7 +1494,16 @@ class GigBookingManager:
             col_num = col_map[dj_short]
             current_value = row_data.get(dj_short, "")
 
-            if allow_multiple:
+            if is_setup:
+                # Setup day: write SETUP (a commitment, not a sale), never BOOKED.
+                new_value = setup_matrix_value(current_value)
+                if self.dry_run and not self.test_mode:
+                    print(f"  [DRY RUN] Would write '{new_value}' to row {row_num}, col {col_num} in {year} sheet")
+                else:
+                    self.sheets.write_cell(row_num, col_num, new_value, year)
+                self.log(f"Matrix: {dj_short} → '{new_value}' (setup)")
+                row_data[dj_short] = new_value
+            elif allow_multiple:
                 # Increment existing BOOKED value
                 new_value = increment_booked(current_value)
                 if self.dry_run and not self.test_mode:
@@ -1475,6 +1547,20 @@ class GigBookingManager:
                 self.sheets.write_cell(row_num, tba_col, new_tba, year)
             self.log(f"Matrix: TBA → '{new_tba}'")
             row_data["TBA"] = new_tba  # Update local copy
+
+        # Setup helper (DJ2): mark the rostered co-DJ SETUP too, so both people
+        # read as committed and the [DJ1/DJ2] calendar title reconciles in the
+        # cross-check. Roadies / non-rostered DJ2 names are skipped.
+        setup_helper = setup_helper_short(booking)
+        if setup_helper and setup_helper in col_map and setup_helper != dj_short:
+            helper_col = col_map[setup_helper]
+            helper_value = setup_matrix_value(row_data.get(setup_helper, ""))
+            if self.dry_run and not self.test_mode:
+                print(f"  [DRY RUN] Would write '{helper_value}' to row {row_num}, col {helper_col} in {year} sheet (setup helper)")
+            else:
+                self.sheets.write_cell(row_num, helper_col, helper_value, year)
+            self.log(f"Matrix: {setup_helper} → '{helper_value}' (setup helper)")
+            row_data[setup_helper] = helper_value
         print()
 
         # -----------------------------------------------------------------
@@ -1482,7 +1568,7 @@ class GigBookingManager:
         # -----------------------------------------------------------------
         backup_dj = None
 
-        if not booking["is_unassigned"]:
+        if not booking["is_unassigned"] and not is_setup:
             print("— Phase 2: Backup assessment...")
             spots = calculate_spots_remaining(row_data, year, booking["date"])
             existing_backup = check_existing_backup(row_data)
@@ -1575,6 +1661,9 @@ class GigBookingManager:
                     print(f"  ✓ {backup_dj} → '{new_backup_val}' written to matrix")
             elif not existing_backup and not self.dry_run:
                 self.log("Backup: skipped")
+        elif is_setup:
+            print("— Skipping backup (setup day — no backup needed)")
+            self.log("Backup: skipped (setup)")
         else:
             print("— Skipping backup (unassigned booking)")
         print()
@@ -1588,9 +1677,7 @@ class GigBookingManager:
         cal_start, cal_end = calculate_event_times(booking)
         if cal_start and cal_end:
             if self.dry_run:
-                title = f"{booking['dj_initials_bracket']} {booking['client_display']}"
-                if booking["has_planner"]:
-                    title += " (planner)"
+                title = primary_event_title(booking)
                 print(f"  [DRY RUN] Would create: {title}")
                 print(f"  Start: {cal_start.strftime('%I:%M %p')}")
                 print(f"  End: {cal_end.strftime('%I:%M %p')}")
@@ -1649,8 +1736,13 @@ class GigBookingManager:
             print(f"  • {action}")
         print()
 
-        # Open pre-filled booking log form (safe in dry-run — nothing submits until user clicks)
-        if not self.test_mode:
+        # Open pre-filled booking log form (safe in dry-run — nothing submits until user clicks).
+        # Skip for setups: the inquiry tracker is for events we're booking, not setup days.
+        if is_setup:
+            print("— Skipping booking log form (setup day — not an inquiry/booking)")
+            self.log("Booking log: skipped (setup)")
+            print()
+        elif not self.test_mode:
             print("— Opening booking log form...")
             open_booking_log_form(booking)
             self.log("Booking log: form opened in browser")
