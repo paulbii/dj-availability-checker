@@ -4,29 +4,42 @@ Shared module for all years. Year-specific scripts (check_2026.py, check_2027.py
 call main() with the appropriate year string.
 """
 
-# Import colorama for colored terminal output
-try:
-    from colorama import init, Fore, Style, Back
-    init(autoreset=True)
-except ImportError:
-    class DummyColors:
-        def __init__(self):
-            self.GREEN = ''
-            self.YELLOW = ''
-            self.BLUE = ''
-            self.RED = ''
-            self.CYAN = ''
-            self.MAGENTA = ''
-            self.RESET_ALL = ''
-            self.BRIGHT = ''
-    
-    Fore = DummyColors()
-    Style = DummyColors()
-    Back = DummyColors()
-
+import os
+import sys
 from datetime import datetime, timedelta
 import calendar
 import subprocess
+
+# Terminal colors route through the shared palette (256-color) so the terminal
+# matches the GUI and web. Color is off when stdout isn't a TTY or NO_COLOR is set.
+from dj_core import term_color as _term_color
+
+_COLOR_ON = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
+
+
+class _Fore:
+    def __init__(self, on):
+        for _n in ("red", "green", "blue", "yellow", "cyan",
+                   "amber", "violet", "gold", "dim"):
+            setattr(self, _n.upper(), _term_color(_n, on))
+        self.MAGENTA = _term_color("violet", on)   # legacy alias → violet
+        self.BLACK = "\033[30m" if on else ""
+
+
+class _Style:
+    def __init__(self, on):
+        self.RESET_ALL = "\033[0m" if on else ""
+        self.BRIGHT = "\033[1m" if on else ""
+
+
+class _Back:
+    def __init__(self, on):
+        self.WHITE = "\033[47m" if on else ""
+
+
+Fore = _Fore(_COLOR_ON)
+Style = _Style(_COLOR_ON)
+Back = _Back(_COLOR_ON)
 
 # Import core functionality
 from dj_core import (
@@ -57,9 +70,9 @@ def format_dj_status(dj_name, value, date_obj, is_bookable, is_backup, year=None
     if gig_booking:
         setup_text = setup_status_text(gig_booking)
         if setup_text:
-            # Setup family: primary committed (yellow≈amber); helper stands out
-            # (magenta≈violet) since they could be pulled for a paying event.
-            color = Fore.MAGENTA if gig_booking.get('role') == 'helper' else Fore.YELLOW
+            # Setup family: primary committed (amber); helper stands out (violet)
+            # since they could be pulled for a paying event.
+            color = Fore.VIOLET if gig_booking.get('role') == 'helper' else Fore.AMBER
             line = f"{color}{dj_name}: {setup_text}{Style.RESET_ALL}"
             if clean_lower != "setup":
                 if clean_value:
@@ -121,8 +134,9 @@ def format_dj_status(dj_name, value, date_obj, is_bookable, is_backup, year=None
             backup_reason = ""
         
         return f"{Fore.BLUE}{dj_name}: {value} - can backup{backup_reason}{Style.RESET_ALL}"
-    
-    return f"{dj_name}: {value}"
+
+    # Dead-end states (OUT, MAXED, etc. with nothing actionable) recede.
+    return f"{Fore.DIM}{dj_name}: {value}{Style.RESET_ALL}"
 
 
 def check_availability(sheet_name, month_day_to_check, service, spreadsheet, spreadsheet_id, client):
@@ -266,7 +280,7 @@ def check_availability(sheet_name, month_day_to_check, service, spreadsheet, spr
     # Add venue information - now showing inquiries that didn't book
     # (booked venues now come from gig database via DJ lines above)
     if venue_info and venue_info.get('not_booked'):
-        response.append(f"\n{Fore.YELLOW}INQUIRIES (not booked): {', '.join(venue_info['not_booked'])}{Style.RESET_ALL}")
+        response.append(f"\n{Fore.GOLD}INQUIRIES (not booked): {', '.join(venue_info['not_booked'])}{Style.RESET_ALL}")
     
     # Show cache info if venue/gig database data was used
     cache_info = get_cache_info()

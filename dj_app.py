@@ -23,6 +23,7 @@ from dj_core import (
     auto_clear_stale_cache,
     get_gig_database_bookings,
     setup_status_text,
+    html_color,
     KNOWN_CELL_VALUES,
 )
 
@@ -47,81 +48,73 @@ def format_dj_status_for_display(dj_name, value, date_obj, year, gig_booking=Non
     clean_value = value.replace(" (BOLD)", "").strip() if value else ""
     clean_lower = clean_value.lower()
 
+    # Matrix-mismatch warning suffix (yellow caution), shared by the gig-db cases.
+    def _warn_suffix():
+        if clean_lower == "setup" or clean_lower == "booked" or clean_lower == "wedfaire":
+            return ""
+        if clean_value:
+            return "  " + html_color("yellow", f'⚠️ matrix shows "{clean_value}"')
+        return "  " + html_color("yellow", "⚠️ matrix is blank")
+
     # If we have gig database info, show venue
     if gig_booking:
         setup_text = setup_status_text(gig_booking)
         if setup_text:
-            # Setup soft-hold: helper stands out (violet) since they could take a
-            # paying event; primary is committed (orange).
-            color = "violet" if gig_booking.get('role') == 'helper' else "orange"
-            text = f":{color}[{setup_text}]"
-            if clean_lower != "setup":
-                if clean_value:
-                    text += f"  :orange[⚠️ matrix shows \"{clean_value}\"]"
-                else:
-                    text += f"  :orange[⚠️ matrix is blank]"
-            return text
+            # Setup family: primary committed (amber); helper stands out (violet)
+            # since they could be pulled for a paying event.
+            color = "violet" if gig_booking.get('role') == 'helper' else "amber"
+            suffix = "" if clean_lower == "setup" else _warn_suffix()
+            return html_color(color, setup_text) + suffix
         venue = gig_booking.get('venue', '')
-        text = f":red[BOOKED ({venue})]"
-        # Warn if matrix doesn't match
-        if clean_lower != "booked" and clean_lower != "wedfaire" and clean_lower != "setup":
-            if clean_value:
-                text += f"  :orange[⚠️ matrix shows \"{clean_value}\"]"
-            else:
-                text += f"  :orange[⚠️ matrix is blank]"
-        return text
+        return html_color("red", f"BOOKED ({venue})") + _warn_suffix()
 
     # Special case for Stephanie 2026 - only available when explicitly assigned
     if dj_name == "Stephanie" and year == "2026":
         if not value or value.strip() == "":
-            return "not available (2026)"
+            return html_color("dim", "not available (2026)")
 
     # Special case for Stephanie on weekdays (2027+)
     if dj_name == "Stephanie" and int(year) >= 2027 and not is_weekend(date_obj):
         if not value or value.strip() == "":
-            return "not available (weekday)"
+            return html_color("dim", "not available (weekday)")
 
     # Special case for Stefano with blank cell
     if dj_name == "Stefano" and (not value or value.strip() == ""):
-        return ":orange[[MAYBE]]"
+        return html_color("yellow", "[MAYBE]")
 
     value_lower = str(value).lower() if value else ""
 
-    # Check for RESERVED status
+    # Hard-unavailable matrix states
     if value and "reserved" in value_lower:
-        return f":red[RESERVED]"
-
-    # Check for STANFORD status
+        return html_color("red", "RESERVED")
     if value and value_lower == "stanford":
-        return f":red[STANFORD]"
-
-    # Check for WEDFAIRE status
+        return html_color("red", "STANFORD")
     if value and value_lower == "wedfaire":
-        return f":red[WEDFAIRE]"
+        return html_color("red", "WEDFAIRE")
 
-    # Check for SETUP status (committed, but a setup/rehearsal, not a paid booking)
+    # SETUP in the matrix (committed, but a setup/rehearsal, not a paid booking)
     if value and value_lower == "setup":
-        return f":orange[SETUP]"
+        return html_color("amber", "SETUP")
 
-    # Check for booked status
+    # Booked
     if value and "booked" in value_lower:
-        return f":red[{value}]"
+        return html_color("red", value)
 
-    # Check for backup status
+    # Backup
     if value and "backup" in value_lower:
-        return f":blue[{value}]"
+        return html_color("blue", value)
 
     # Felipe blank cell in 2026/2027
     if dj_name == "Felipe" and year in ["2026", "2027"] and (not value or value.strip() == ""):
-        return ":blue[[BLANK] - can backup]"
+        return html_color("blue", "[BLANK] - can backup")
 
-    # Check if LAST status
+    # LAST status
     if value and value_lower == "last":
-        return f":green[{value} - available (low priority)]"
+        return html_color("green", f"{value} - available (low priority)")
 
     # Unknown cell value warning
     if clean_value and clean_lower not in KNOWN_CELL_VALUES:
-        return f":orange[{clean_value} ⚠️ unknown status — treating as unavailable]"
+        return html_color("yellow", f"{clean_value} ⚠️ unknown status — treating as unavailable")
 
     # Check availability
     is_bold = "(BOLD)" in value if value else False
@@ -133,7 +126,7 @@ def format_dj_status_for_display(dj_name, value, date_obj, year, gig_booking=Non
         nearby_text = f" (booked: {', '.join(nearby_bookings)})"
 
     if can_book:
-        return f":green[{value if value else 'BLANK'} - available{nearby_text}]"
+        return html_color("green", f"{value if value else 'BLANK'} - available{nearby_text}")
 
     if can_backup:
         backup_reason = ""
@@ -143,10 +136,10 @@ def format_dj_status_for_display(dj_name, value, date_obj, year, gig_booking=Non
             backup_reason = " (weekday)"
         elif dj_name == "Felipe" and ("dad" in value_lower or "ok to backup" in value_lower):
             backup_reason = ""
+        return html_color("blue", f"{value if value else 'BLANK'} - can backup{backup_reason}")
 
-        return f":blue[{value if value else 'BLANK'} - can backup{backup_reason}]"
-
-    return value if value else ""
+    # Dead-end states (OUT/MAXED/etc.) recede.
+    return html_color("dim", value) if value else ""
 
 
 # ── Tab: Check Specific Date ──────────────────────────────────────────────────
@@ -238,19 +231,19 @@ def tab_check_date(year, service, spreadsheet, spreadsheet_id, client):
                 if label == "TBA":
                     if unassigned_bookings:
                         venues = [b.get('venue', 'Unknown') for b in unassigned_bookings]
-                        formatted_value = f":red[BOOKED ({', '.join(venues)})]"
+                        formatted_value = html_color("red", f"BOOKED ({', '.join(venues)})")
                     elif value and ("booked" in str(value).lower() or "aag" in str(value).lower()):
-                        formatted_value = f":red[{value}]"
+                        formatted_value = html_color("red", value)
                     else:
-                        formatted_value = value if value else ""
+                        formatted_value = html_color("dim", value) if value else ""
                     dj_items.append((label, formatted_value))
 
                 elif label == "AAG":
                     vl = str(value).lower()
                     if "reserved" in vl:
-                        formatted_value = f":red[{value}]"
+                        formatted_value = html_color("red", value)
                     else:
-                        formatted_value = value if value else ""
+                        formatted_value = html_color("dim", value) if value else ""
                     dj_items.append((label, formatted_value))
 
                 elif label == "Stephanie":
@@ -289,11 +282,11 @@ def tab_check_date(year, service, spreadsheet, spreadsheet_id, client):
 
         with status_col1:
             for label, formatted_value in dj_items[:mid_point]:
-                st.markdown(f"**{label}:** {formatted_value}")
+                st.markdown(f"**{label}:** {formatted_value}", unsafe_allow_html=True)
 
         with status_col2:
             for label, formatted_value in dj_items[mid_point:]:
-                st.markdown(f"**{label}:** {formatted_value}")
+                st.markdown(f"**{label}:** {formatted_value}", unsafe_allow_html=True)
 
         # Availability summary
         st.markdown("---")
@@ -777,12 +770,17 @@ def main():
 
         st.markdown("---")
         st.markdown("### 🎨 Status Colors")
-        st.markdown("""
-        - :red[**Red**] = Booked / Unavailable
-        - :blue[**Blue**] = Backup assigned
-        - :green[**Green**] = Available
-        - :orange[**Orange**] = Maybe / Unknown
-        """)
+        st.markdown(
+            f"{html_color('green', 'Green')} = Available to book<br>"
+            f"{html_color('blue', 'Blue')} = Can backup<br>"
+            f"{html_color('red', 'Red')} = Booked / full<br>"
+            f"{html_color('amber', 'Amber')} = Setup &mdash; primary (committed)<br>"
+            f"{html_color('violet', 'Violet')} = Setup &mdash; helper (could take a paying event)<br>"
+            f"{html_color('gold', 'Gold')} = Inquiries (not booked)<br>"
+            f"{html_color('yellow', 'Yellow')} = Maybe / warnings<br>"
+            f"{html_color('dim', 'Gray')} = Out / not available",
+            unsafe_allow_html=True,
+        )
 
         st.markdown("---")
         st.markdown("### ✨ Features")

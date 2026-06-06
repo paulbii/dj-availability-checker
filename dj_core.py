@@ -93,6 +93,53 @@ DJ_INITIALS = {
     "Unknown": "UP",
 }
 
+# =============================================================================
+# STATUS COLOR PALETTE — single source of truth for all three surfaces
+# (terminal via 256-color, web via HTML spans, GUI mirrors these hexes in CSS).
+# One color = one meaning.
+# =============================================================================
+PALETTE = {
+    "green":  "#55ff55",  # available to book
+    "blue":   "#5555ff",  # can backup
+    "red":    "#ff5555",  # BOOKED / full (hard no)
+    "amber":  "#ffb454",  # SETUP primary (committed, but a setup not a sale)
+    "violet": "#c792ff",  # SETUP helper (could take a paying event, review)
+    "yellow": "#ffff55",  # caution: [MAYBE] / warnings
+    "gold":   "#ffd479",  # INQUIRIES (not booked)
+    "cyan":   "#55ffff",  # info (cache / gig-db notices)
+    "accent": "#4fc3f7",  # headings
+    "dim":    "#8892a4",  # dead-ends (OUT/MAXED/N-A) — recede
+}
+
+
+def hex_to_ansi256(hexstr):
+    """Nearest xterm-256 color index for a #rrggbb hex (closest-safe terminal
+    match; works in every terminal incl. Terminal.app, unlike 24-bit truecolor)."""
+    h = hexstr.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    # Near-gray → use the 24-step grayscale ramp (232-255) for a cleaner match.
+    if max(r, g, b) - min(r, g, b) < 16:
+        gray = round((((r + g + b) / 3) - 8) / 10)
+        return 232 + min(23, max(0, gray))
+    levels = [0, 95, 135, 175, 215, 255]
+    nearest = lambda c: min(range(6), key=lambda i: abs(levels[i] - c))
+    return 16 + 36 * nearest(r) + 6 * nearest(g) + nearest(b)
+
+
+def term_color(name, enabled=True):
+    """ANSI 256-color foreground escape for a palette name ('' if disabled)."""
+    if not enabled or name not in PALETTE:
+        return ""
+    return f"\033[38;5;{hex_to_ansi256(PALETTE[name])}m"
+
+
+def html_color(name, text):
+    """Wrap text in an inline HTML span using the palette hex (for Streamlit).
+    Text is HTML-escaped, so venue/client names with & or < render safely."""
+    hexv = PALETTE.get(name, PALETTE["dim"])
+    return f'<span style="color:{hexv}">{html.escape(str(text))}</span>'
+
+
 # DJ email addresses (all follow firstname@bigfundj.com pattern)
 DJ_EMAILS = {
     "Henry": "henry@bigfundj.com",

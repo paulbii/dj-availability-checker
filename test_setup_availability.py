@@ -10,7 +10,39 @@ Both are marked SETUP in the matrix, so the role comes from the gig db
 
 import unittest
 
-from dj_core import ingest_gig_booking, setup_status_text
+from dj_core import (
+    ingest_gig_booking,
+    setup_status_text,
+    PALETTE,
+    hex_to_ansi256,
+    term_color,
+    html_color,
+)
+
+
+class TestPalette(unittest.TestCase):
+    def test_hex_to_ansi256_in_range_and_distinct(self):
+        # Every palette color maps to a valid 256-color index.
+        for name, hexv in PALETTE.items():
+            self.assertTrue(16 <= hex_to_ansi256(hexv) <= 255, name)
+        # A gray maps into the grayscale ramp (232-255).
+        self.assertTrue(232 <= hex_to_ansi256("#808080") <= 255)
+        # Distinct hues get distinct codes.
+        self.assertNotEqual(hex_to_ansi256(PALETTE["red"]),
+                            hex_to_ansi256(PALETTE["green"]))
+        self.assertNotEqual(hex_to_ansi256(PALETTE["amber"]),
+                            hex_to_ansi256(PALETTE["violet"]))
+
+    def test_term_color_toggle(self):
+        self.assertEqual(term_color("amber", enabled=False), "")
+        self.assertTrue(term_color("amber").startswith("\033[38;5;"))
+        self.assertEqual(term_color("not_a_color"), "")
+
+    def test_html_color(self):
+        self.assertEqual(
+            html_color("gold", "INQUIRIES"),
+            f'<span style="color:{PALETTE["gold"]}">INQUIRIES</span>',
+        )
 
 
 class TestIngestGigBooking(unittest.TestCase):
