@@ -23,6 +23,8 @@ Usage:
 """
 
 import argparse
+import os
+import re
 import subprocess
 import sys
 from collections import defaultdict
@@ -124,15 +126,15 @@ def read_stefano_column(spreadsheet, year):
 # RULE ENGINE
 # =============================================================================
 
-def calculate_sync(rows, year):
+def compute_should_be_maxed(rows):
     """
-    Recalculate which dates should be MAXED based on current bookings,
-    then diff against the matrix to find additions and removals.
+    Apply the booking rules to determine which Fri/Sat/Sun dates SHOULD be
+    MAXED, independent of current matrix or calendar state.
 
     Returns:
-        additions:  {date: (row_number, current_value, [reasons])}
-        removals:   {date: (row_number, current_value, [reasons])}
-        booked_fss: list of confirmed booked Fri/Sat/Sun dates
+        should_be_maxed: set of dates that should be blocked (SKIP values excluded)
+        pending_reasons: {date: set(reason strings)}
+        booked_fss:      list of confirmed booked Fri/Sat/Sun dates
     """
     date_map = {d: (row, val) for d, row, val in rows}
 
@@ -179,6 +181,21 @@ def calculate_sync(rows, year):
             if val not in SKIP_VALUES:
                 should_be_maxed.add(d)
 
+    return should_be_maxed, pending_reasons, sorted(booked_fss)
+
+
+def calculate_sync(rows, year):
+    """
+    Recalculate which dates should be MAXED based on current bookings,
+    then diff against the matrix to find additions and removals.
+
+    Returns:
+        additions:  {date: (row_number, current_value, [reasons])}
+        removals:   {date: (row_number, current_value, [reasons])}
+        booked_fss: list of confirmed booked Fri/Sat/Sun dates
+    """
+    should_be_maxed, pending_reasons, booked_fss = compute_should_be_maxed(rows)
+
     # -- Diff against current state --
     additions = {}
     removals = {}
@@ -204,9 +221,117 @@ def calculate_sync(rows, year):
     return additions, removals, sorted(booked_fss)
 
 
+def calculate_calendar_repairs(rows, should_be_maxed, cal_present, today):
+    """
+    Reconcile the Unavailable calendar against matrix state, catching drift the
+    matrix diff misses (a date that's already correctly MAXED in the matrix but
+    has no calendar event, or a stale [SB] MAXED event with no matching MAXED).
+
+    Args:
+        rows:            list of (date, row_number, value) from the matrix
+        should_be_maxed: set of dates the rules say should be blocked
+        cal_present:     set of dates that currently have an [SB] MAXED event,
+                         or None if the calendar could not be read
+        today:           date used to skip past-date event creation
+
+    Returns (both keyed by date, valued (row_number, current_value, [reasons])
+    to match the additions/removals shape):
+        cal_creates: matrix already MAXED, calendar event missing
+        cal_deletes: stale [SB] MAXED event, matrix not MAXED
+    """
+    cal_creates = {}
+    cal_deletes = {}
+
+    if cal_present is None:
+        return cal_creates, cal_deletes
+
+    for d, row, val in rows:
+        if not is_fss(d) or val in SKIP_VALUES:
+            continue
+
+        # Missing event for a date the matrix already blocks.
+        # Restricted to val == "MAXED" so we never overlap the additions path
+        # (blank/OK dates) or touch OUT dates. Past dates are skipped.
+        if val == "MAXED" and d in should_be_maxed:
+            if d not in cal_present and d >= today:
+                cal_creates[d] = (row, val, ["matrix already MAXED but no calendar event"])
+
+        # Stale event: a [SB] MAXED event with no MAXED in the matrix and no
+        # rule requiring the date blocked. (val == MAXED removals already delete
+        # their own event via the removals path.)
+        if d in cal_present and val != "MAXED" and d not in should_be_maxed:
+            cal_deletes[d] = (row, val, ["calendar event with no matching MAXED in matrix"])
+
+    return cal_creates, cal_deletes
+
+
 # =============================================================================
 # CALENDAR
 # =============================================================================
+
+def parse_unavailable_calendar(output, year):
+    """
+    Parse icalBuddy output from the Unavailable calendar into a set of dates
+    that have an [SB] MAXED event.
+
+    icalBuddy all-day format (title and date on separate lines):
+        [SB] MAXED OUT
+            08/01
+    """
+    present = set()
+    pending = False  # True after a matching [SB] ... MAXED title line
+
+    for line in output.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        # Title line: starts with a bracket code, not a digit
+        if stripped.startswith("[") and not stripped[0].isdigit():
+            up = stripped.upper()
+            pending = "[SB]" in up and "MAXED" in up
+            continue
+
+        # Date line following a matching title
+        if pending:
+            m = re.search(r"(\d{1,2})/(\d{1,2})", stripped)
+            if m:
+                present.add(date(int(year), int(m.group(1)), int(m.group(2))))
+            pending = False
+
+    return present
+
+
+def fetch_unavailable_maxed(year):
+    """
+    Read the Unavailable calendar via icalBuddy and return the set of dates with
+    an [SB] MAXED event. Returns None if the calendar can't be read, so callers
+    fall back to matrix-only behavior.
+    """
+    ical_buddy = "/opt/homebrew/bin/icalBuddy"
+    if not os.path.exists(ical_buddy):
+        print("  WARNING: icalBuddy not installed (brew install ical-buddy)")
+        print("  Skipping calendar verification -- matrix-only this run.")
+        return None
+
+    try:
+        result = subprocess.run(
+            [ical_buddy, "-ic", "Unavailable",
+             "-eep", "notes,url,location,attendees",
+             "-b", "", "-nc", "-nrd",
+             "-df", "%m/%d",
+             "-iep", "title,datetime",
+             f"eventsFrom:{year}-01-01", f"to:{year}-12-31"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode != 0:
+            print(f"  WARNING: icalBuddy error: {result.stderr.strip()}")
+            print("  Skipping calendar verification -- matrix-only this run.")
+            return None
+        return parse_unavailable_calendar(result.stdout, year)
+    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+        print(f"  WARNING: calendar read failed ({e}); matrix-only this run.")
+        return None
 
 def create_calendar_event(event_date, dry_run=False):
     """Create an all-day [SB] MAXED OUT event on the Unavailable calendar via AppleScript."""
@@ -306,13 +431,17 @@ def clear_maxed(spreadsheet, year, row_number, event_date, dry_run=False):
 # INTERACTIVE SELECTION
 # =============================================================================
 
-def display_and_select(additions, removals):
+def display_and_select(additions, removals, cal_creates=None, cal_deletes=None):
     """
-    Display additions and removals in two sections, prompt for selection.
+    Display additions, removals, and calendar-only repairs in sections, then
+    prompt for selection.
     Returns list of (action, date, row_number, current_value) to apply.
-    action is "add" or "remove".
+    action is "add", "remove", "cal_add", or "cal_remove".
     """
-    if not additions and not removals:
+    cal_creates = cal_creates or {}
+    cal_deletes = cal_deletes or {}
+
+    if not additions and not removals and not cal_creates and not cal_deletes:
         print("\nNo changes needed -- Stefano's column is in sync.")
         return []
 
@@ -333,6 +462,8 @@ def display_and_select(additions, removals):
 
     print_group("Dates to MAXED", additions, "add")
     print_group("Dates to Open Up", removals, "remove")
+    print_group("Calendar event missing (matrix already MAXED)", cal_creates, "cal_add")
+    print_group("Stale calendar event (matrix not MAXED)", cal_deletes, "cal_remove")
 
     print(f"\n  {len(ordered)} change(s) suggested.")
     print("  Enter numbers to apply (e.g. 1,3,5), 'all', or press Enter to skip: ", end="")
@@ -385,8 +516,16 @@ def main():
     print(f"Reading Stefano's column ({STEFANO_COL_LETTER}) for {year}...")
     rows = read_stefano_column(spreadsheet, year)
 
+    # Read the calendar to verify events against matrix state
+    print(f"Reading Unavailable calendar for {year}...")
+    cal_present = fetch_unavailable_maxed(year)
+
     # Analyze
     additions, removals, booked_fss = calculate_sync(rows, year)
+    should_be_maxed, _, _ = compute_should_be_maxed(rows)
+    cal_creates, cal_deletes = calculate_calendar_repairs(
+        rows, should_be_maxed, cal_present, date.today()
+    )
 
     currently_maxed = sum(1 for _, _, v in rows if v == "MAXED")
     correctly_maxed = currently_maxed - len(removals)
@@ -398,9 +537,12 @@ def main():
     print(f"  Correctly MAXED: {correctly_maxed}")
     print(f"  To add: {len(additions)}")
     print(f"  To remove: {len(removals)}")
+    if cal_present is not None:
+        print(f"  Calendar events to create (matrix already MAXED): {len(cal_creates)}")
+        print(f"  Stale calendar events to delete: {len(cal_deletes)}")
 
     # Select
-    selected = display_and_select(additions, removals)
+    selected = display_and_select(additions, removals, cal_creates, cal_deletes)
 
     if not selected:
         print("\nNo changes made.")
@@ -418,7 +560,9 @@ def main():
             if write_maxed(spreadsheet, year, row_number, dry_run):
                 print(f"      Matrix -> MAXED")
                 ok_matrix += 1
-            if create_calendar_event(d, dry_run):
+            if cal_present is not None and d in cal_present:
+                print(f"      Calendar event already exists -- skipped")
+            elif create_calendar_event(d, dry_run):
                 print(f"      Calendar event created")
                 ok_cal += 1
         elif action == "remove":
@@ -429,6 +573,16 @@ def main():
                 ok_matrix += 1
             if delete_calendar_event(d, dry_run):
                 print(f"      Calendar event deleted")
+                ok_cal += 1
+        elif action == "cal_add":
+            # Matrix already MAXED; only the calendar event is missing.
+            if create_calendar_event(d, dry_run):
+                print(f"      Calendar event created (matrix unchanged)")
+                ok_cal += 1
+        elif action == "cal_remove":
+            # Stale calendar event; matrix is already correct.
+            if delete_calendar_event(d, dry_run):
+                print(f"      Calendar event deleted (matrix unchanged)")
                 ok_cal += 1
 
     tag = "[DRY RUN] " if dry_run else ""

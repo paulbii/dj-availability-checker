@@ -14,6 +14,9 @@ from datetime import date
 
 from stefano_maxed_enforcer import (
     calculate_sync,
+    calculate_calendar_repairs,
+    compute_should_be_maxed,
+    parse_unavailable_calendar,
     is_fss,
     adjacent_weekend_dates,
     parse_matrix_date,
@@ -246,6 +249,88 @@ class TestParseMatrixDate(unittest.TestCase):
 
     def test_empty(self):
         self.assertIsNone(parse_matrix_date("", 2026))
+
+
+class TestParseUnavailableCalendar(unittest.TestCase):
+    def test_extracts_sb_maxed_dates(self):
+        output = (
+            "[SB] MAXED OUT\n"
+            "    08/01\n"
+            "[PB] Christina and David\n"
+            "    08/02\n"
+            "[SB] MAXED OUT\n"
+            "    08/15\n"
+        )
+        present = parse_unavailable_calendar(output, 2026)
+        self.assertEqual(present, {date(2026, 8, 1), date(2026, 8, 15)})
+
+    def test_ignores_other_sb_events(self):
+        """[SB] events that aren't MAXED (e.g. PAID BACKUP) are not counted."""
+        output = "[SB] PAID BACKUP DJ\n    08/01\n"
+        self.assertEqual(parse_unavailable_calendar(output, 2026), set())
+
+    def test_empty_output(self):
+        self.assertEqual(parse_unavailable_calendar("", 2026), set())
+
+
+class TestCalculateCalendarRepairs(unittest.TestCase):
+    PAST = date(2027, 1, 1)     # makes Aug 2026 dates "past"
+    FUTURE = date(2026, 5, 31)  # makes Aug 2026 dates "future"
+
+    def test_maxed_with_missing_event_creates(self):
+        """The 8-1-26 case: matrix MAXED, no calendar event -> cal_create."""
+        rows = make_rows([(8, 1, "MAXED"), (8, 8, "BOOKED")])
+        should, _, _ = compute_should_be_maxed(rows)
+        creates, deletes = calculate_calendar_repairs(rows, should, set(), self.FUTURE)
+        self.assertIn(date(2026, 8, 1), creates)
+        self.assertEqual(deletes, {})
+
+    def test_maxed_with_present_event_no_op(self):
+        rows = make_rows([(8, 1, "MAXED"), (8, 8, "BOOKED")])
+        should, _, _ = compute_should_be_maxed(rows)
+        present = {date(2026, 8, 1)}
+        creates, deletes = calculate_calendar_repairs(rows, should, present, self.FUTURE)
+        self.assertEqual(creates, {})
+        self.assertEqual(deletes, {})
+
+    def test_past_date_not_created(self):
+        rows = make_rows([(8, 1, "MAXED"), (8, 8, "BOOKED")])
+        should, _, _ = compute_should_be_maxed(rows)
+        creates, _ = calculate_calendar_repairs(rows, should, set(), self.PAST)
+        self.assertEqual(creates, {})
+
+    def test_addition_not_double_listed(self):
+        """A blank date that's an addition is NOT also a cal_create."""
+        rows = make_rows([(8, 1, ""), (8, 8, "BOOKED")])
+        should, _, _ = compute_should_be_maxed(rows)
+        creates, deletes = calculate_calendar_repairs(rows, should, set(), self.FUTURE)
+        self.assertEqual(creates, {})
+        self.assertEqual(deletes, {})
+
+    def test_stale_event_deleted(self):
+        """Event present, matrix not MAXED, no rule requires it -> cal_delete."""
+        rows = make_rows([(8, 1, "")])  # no bookings -> should_be_maxed empty
+        should, _, _ = compute_should_be_maxed(rows)
+        present = {date(2026, 8, 1)}
+        creates, deletes = calculate_calendar_repairs(rows, should, present, self.FUTURE)
+        self.assertEqual(creates, {})
+        self.assertIn(date(2026, 8, 1), deletes)
+
+    def test_out_date_left_alone(self):
+        """OUT dates never get a MAXED calendar event created."""
+        rows = make_rows([(8, 1, "OUT"), (8, 8, "BOOKED")])
+        should, _, _ = compute_should_be_maxed(rows)
+        creates, deletes = calculate_calendar_repairs(rows, should, set(), self.FUTURE)
+        self.assertEqual(creates, {})
+        self.assertEqual(deletes, {})
+
+    def test_no_calendar_returns_empty(self):
+        """cal_present=None (read failed) -> no repairs proposed."""
+        rows = make_rows([(8, 1, "MAXED"), (8, 8, "BOOKED")])
+        should, _, _ = compute_should_be_maxed(rows)
+        creates, deletes = calculate_calendar_repairs(rows, should, None, self.FUTURE)
+        self.assertEqual(creates, {})
+        self.assertEqual(deletes, {})
 
 
 if __name__ == "__main__":
