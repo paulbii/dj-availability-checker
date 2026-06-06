@@ -58,29 +58,22 @@ DJ_NAME_MAP = {
 # GIG DATABASE (live from JSON endpoint)
 # =============================================================================
 
-def fetch_gig_db_json(year):
+def parse_gig_db_records(data):
     """
-    Fetch gig database directly from the JSON endpoint.
-    URL: listviewjson.php?year=YYYY
+    Parse raw gig-database JSON records into (primary, secondary) date maps.
 
-    Returns: dict of { "M/D": ["DJ1", "DJ2", ...] }
+    primary:   { "M/D": ["DJ1", ...] } — the assigned_dj (DJ1) for each event,
+               always included (TBA for unassigned).
+    secondary: { "M/D": ["DJ", ...] } — the assigned_roadie_or_dj2 slot, kept
+               ONLY when the name maps to a rostered DJ (allowlist). That slot
+               holds roadies OR co-DJs OR an owner who roadies; an unrecognized
+               name is a roadie and is dropped here so it never false-flags.
+               Whether a rostered DJ2 name actually counts as a second DJ is
+               decided later in compare_systems (explain-not-demand: only if the
+               availability matrix also lists them for that date).
     """
-    events = defaultdict(list)
-    url = f"{GIG_DB_JSON_URL}?year={year}"
-
-    print(f"  Fetching from {url}...")
-    try:
-        req = urllib.request.Request(url, headers={
-            'User-Agent': 'BigFunDJ-BookingComparator/1.0',
-        })
-        with urllib.request.urlopen(req, timeout=30) as response:
-            data = json.loads(response.read().decode('utf-8'))
-    except urllib.error.URLError as e:
-        print(f"  ERROR: Could not reach gig database: {e}")
-        return None
-    except json.JSONDecodeError as e:
-        print(f"  ERROR: Invalid JSON response: {e}")
-        return None
+    primary = defaultdict(list)
+    secondary = defaultdict(list)
 
     for record in data:
         date_str = record.get('event_date', '')
@@ -101,19 +94,53 @@ def fetch_gig_db_json(year):
         except ValueError:
             continue
 
-        # Map DJ name
+        # Map DJ1 name
         if dj_full.lower() in ('unassigned', 'unknown', ''):
             dj_name = 'TBA'
         else:
             dj_name = DJ_NAME_MAP.get(dj_full, dj_full)
 
-        events[date_key].append(dj_name)
+        primary[date_key].append(dj_name)
+
+        # DJ2 / roadie slot — allowlist to rostered DJ names only.
+        dj2_full = record.get('assigned_roadie_or_dj2', '').strip()
+        if dj2_full in DJ_NAME_MAP:
+            secondary[date_key].append(DJ_NAME_MAP[dj2_full])
 
     # Sort DJs for each date
-    for date_key in events:
-        events[date_key] = sorted(events[date_key])
+    for date_key in primary:
+        primary[date_key] = sorted(primary[date_key])
+    for date_key in secondary:
+        secondary[date_key] = sorted(secondary[date_key])
 
-    return events
+    return primary, secondary
+
+
+def fetch_gig_db_json(year):
+    """
+    Fetch gig database directly from the JSON endpoint.
+    URL: listviewjson.php?year=YYYY
+
+    Returns: (primary, secondary) date maps (see parse_gig_db_records),
+             or (None, None) on error.
+    """
+    url = f"{GIG_DB_JSON_URL}?year={year}"
+
+    print(f"  Fetching from {url}...")
+    try:
+        req = urllib.request.Request(url, headers={
+            'User-Agent': 'BigFunDJ-BookingComparator/1.0',
+        })
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode('utf-8'))
+    except urllib.error.URLError as e:
+        print(f"  ERROR: Could not reach gig database: {e}")
+        return None, None
+    except json.JSONDecodeError as e:
+        print(f"  ERROR: Invalid JSON response: {e}")
+        return None, None
+
+    return parse_gig_db_records(data)
 
 
 # =============================================================================
@@ -330,7 +357,7 @@ def fetch_master_calendar(year):
 
         if result.returncode != 0:
             print(f"  WARNING: icalBuddy returned error: {result.stderr}")
-            return None
+            return None, None
 
         # icalBuddy output format (title and datetime on separate lines):
         #   [PB] Christina and David
@@ -416,7 +443,8 @@ def fetch_master_calendar(year):
 # =============================================================================
 
 def compare_systems(gig_db, avail_matrix, master_cal=None,
-                    matrix_backups=None, cal_backups=None, output=None):
+                    matrix_backups=None, cal_backups=None, output=None,
+                    gig_secondary=None):
     """
     Compare all systems and generate discrepancy report.
 
@@ -427,7 +455,12 @@ def compare_systems(gig_db, avail_matrix, master_cal=None,
         matrix_backups: dict { "M/D": ["DJ1", ...] } or None — backups from Sheets
         cal_backups: dict { "M/D": ["DJ1", ...] } or None — backups from calendar
         output: file object or None (prints to stdout)
+        gig_secondary: dict { "M/D": ["DJ", ...] } or None — rostered DJ2 names
+            from the gig db. Applied explain-not-demand: a DJ2 person is added to
+            the gig-db set for a date only when the matrix also lists them that
+            date. Absent from the matrix = roadie -> ignored (no false flag).
     """
+    gig_secondary = gig_secondary or {}
     out = output or sys.stdout
 
     def write(text=""):
@@ -467,8 +500,18 @@ def compare_systems(gig_db, avail_matrix, master_cal=None,
     # Find discrepancies
     issues = []
     for date_key in all_dates:
-        gig_djs = sorted(set(gig_db.get(date_key, [])))
         matrix_djs = sorted(set(avail_matrix.get(date_key, [])))
+
+        # Start from DJ1, then add any rostered DJ2 the matrix confirms for the
+        # date (explain-not-demand). A DJ2 name the matrix doesn't list is a
+        # roadie (or an owner roadying) and is left out.
+        gig_set = set(gig_db.get(date_key, []))
+        matrix_set = set(matrix_djs)
+        for dj in gig_secondary.get(date_key, []):
+            if dj in matrix_set:
+                gig_set.add(dj)
+        gig_djs = sorted(gig_set)
+
         cal_djs = sorted(set(master_cal.get(date_key, []))) if has_calendar else None
 
         if has_calendar:
@@ -632,6 +675,8 @@ def main():
     print("=" * 50)
 
     # 1. Fetch gig database — live endpoint by default, text file as fallback
+    # Text-file fallback has no DJ2 column, so its secondary map is empty.
+    gig_secondary = {}
     if args.gig_db_file:
         # Manual text file specified
         if not os.path.exists(args.gig_db_file):
@@ -642,11 +687,12 @@ def main():
     else:
         # Fetch live from JSON endpoint
         print(f"\n[1/3] Fetching gig database from bigfundj.com...")
-        gig_db = fetch_gig_db_json(args.year)
+        gig_db, gig_secondary = fetch_gig_db_json(args.year)
         if gig_db is None:
             print("  Falling back to local gig_db.txt...")
             if os.path.exists("gig_db.txt"):
                 gig_db = parse_gig_db("gig_db.txt", args.year)
+                gig_secondary = {}
             else:
                 print("  Error: No gig_db.txt found either. Cannot continue.")
                 sys.exit(1)
@@ -677,11 +723,12 @@ def main():
 
     # Always print to console AND save to file
     compare_systems(gig_db, avail_matrix, master_cal,
-                    matrix_backups, cal_backups)
+                    matrix_backups, cal_backups, gig_secondary=gig_secondary)
 
     with open(args.output, 'w') as f:
         compare_systems(gig_db, avail_matrix, master_cal,
-                        matrix_backups, cal_backups, output=f)
+                        matrix_backups, cal_backups, output=f,
+                        gig_secondary=gig_secondary)
     print(f"\nReport saved to: {args.output}")
 
 
