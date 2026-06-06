@@ -16,6 +16,7 @@ except ImportError:
             self.BLUE = ''
             self.RED = ''
             self.CYAN = ''
+            self.MAGENTA = ''
             self.RESET_ALL = ''
             self.BRIGHT = ''
     
@@ -56,9 +57,9 @@ def format_dj_status(dj_name, value, date_obj, is_bookable, is_backup, year=None
     if gig_booking:
         setup_text = setup_status_text(gig_booking)
         if setup_text:
-            # Setup: show the soft-hold role. Helper stands out (cyan) since
-            # they could be pulled for a paying event; primary is committed.
-            color = Fore.CYAN if gig_booking.get('role') == 'helper' else Fore.YELLOW
+            # Setup family: primary committed (yellow≈amber); helper stands out
+            # (magenta≈violet) since they could be pulled for a paying event.
+            color = Fore.MAGENTA if gig_booking.get('role') == 'helper' else Fore.YELLOW
             line = f"{color}{dj_name}: {setup_text}{Style.RESET_ALL}"
             if clean_lower != "setup":
                 if clean_value:

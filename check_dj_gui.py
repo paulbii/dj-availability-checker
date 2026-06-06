@@ -57,6 +57,9 @@ HTML = """
     --blue: #5555ff;
     --cyan: #55ffff;
     --orange: #ffaa00;
+    --amber: #ffb454;
+    --violet: #c792ff;
+    --gold: #ffd479;
   }
 
   body {
@@ -270,6 +273,9 @@ HTML = """
   .results .line.yellow { color: var(--yellow); }
   .results .line.blue { color: var(--blue); }
   .results .line.cyan { color: var(--cyan); }
+  .results .line.amber { color: var(--amber); }
+  .results .line.violet { color: var(--violet); }
+  .results .line.gold { color: var(--gold); }
   .results .line.dim { color: var(--text-dim); }
   .results .line.heading {
     color: var(--accent);
@@ -666,6 +672,8 @@ class Api:
             return {"text": t, "cls": "heading"}
 
         # Status colors
+        if "setup" in lower:
+            return {"text": t, "cls": "violet" if "helper" in lower else "amber"}
         if "booked" in lower and (":" in t):
             return {"text": t, "cls": "red"}
         if "reserved" in lower:
@@ -686,7 +694,9 @@ class Api:
             return {"text": t, "cls": "yellow"}
         if "⚠" in t or "unknown" in lower:
             return {"text": t, "cls": "warn"}
-        if "TIP:" in t or "INQUIRIES" in t:
+        if "INQUIRIES" in t:
+            return {"text": t, "cls": "gold"}
+        if "TIP:" in t:
             return {"text": t, "cls": "yellow"}
         if "ℹ" in t or "cache" in lower:
             return {"text": t, "cls": "cyan"}
@@ -854,7 +864,7 @@ class Api:
 
             if venue_info and venue_info.get('not_booked'):
                 lines.append({"text": "", "cls": "divider"})
-                lines.append({"text": f"INQUIRIES (not booked): {', '.join(venue_info['not_booked'])}", "cls": "yellow"})
+                lines.append({"text": f"INQUIRIES (not booked): {', '.join(venue_info['not_booked'])}", "cls": "gold"})
 
             cache_info = get_cache_info()
             if cache_info:
@@ -886,9 +896,9 @@ class Api:
         if gig_booking:
             setup_text = setup_status_text(gig_booking)
             if setup_text:
-                # Setup soft-hold: helper stands out (cyan) since they could be
-                # pulled for a paying event; primary is committed (yellow).
-                cls = "cyan" if gig_booking.get('role') == 'helper' else "yellow"
+                # Setup family: primary committed (amber); helper stands out
+                # (violet) since they could be pulled for a paying event.
+                cls = "violet" if gig_booking.get('role') == 'helper' else "amber"
                 t = f"{dj_name}: {setup_text}"
                 if clean_lower != "setup":
                     if clean_value:
@@ -936,7 +946,8 @@ class Api:
         if is_backup:
             return {"text": f"{dj_name}: {value} - can backup", "cls": "blue"}
 
-        return {"text": f"{dj_name}: {value}", "cls": ""}
+        # Dead-end states (OUT, MAXED, etc. with nothing actionable) recede.
+        return {"text": f"{dj_name}: {value}", "cls": "dim"}
 
     def check_date_range(self, start_str, end_str, day_filter, min_spots):
         """Query date range - mirrors query_date_range()."""
