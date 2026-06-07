@@ -477,13 +477,20 @@ def compare_systems(gig_db, avail_matrix, master_cal=None,
     # Statistics
     write("STATISTICS")
     write("-" * 70)
+    # These are DJ-entry counts, not event counts. The Gig DB line counts one
+    # DJ1 per record (≈ events); the Matrix and Calendar count every DJ on a
+    # date, so a multi-DJ event tallies more than once. Totals differing is
+    # expected, not a discrepancy — the per-date checks below are the real signal.
     gig_count = sum(len(djs) for djs in gig_db.values())
     matrix_count = sum(len(djs) for djs in avail_matrix.values())
-    write(f"  Gig Database:        {gig_count} bookings on {len(gig_db)} dates")
-    write(f"  Availability Matrix: {matrix_count} bookings on {len(avail_matrix)} dates")
+    write(f"  Gig Database:        {gig_count} events on {len(gig_db)} dates (DJ1 per record)")
+    write(f"  Availability Matrix: {matrix_count} DJ entries on {len(avail_matrix)} dates")
     if has_calendar:
         cal_count = sum(len(djs) for djs in master_cal.values())
-        write(f"  Master Calendar:     {cal_count} events on {len(master_cal)} dates")
+        write(f"  Master Calendar:     {cal_count} DJ entries on {len(master_cal)} dates")
+        write("  (matrix/calendar count each DJ on an event; totals differ by design)")
+    else:
+        write("  (matrix counts each DJ on an event; differs from the event count by design)")
     write()
 
     # All unique dates, sorted chronologically
