@@ -167,6 +167,15 @@ Cross-checks three systems (Gig Database, Availability Matrix, Master Calendar) 
 
 After booking confirmation is sent to a couple, creates pre-filled forward drafts in MailMaven for the office (confirmations@bigfundj.com, CC: Henry & Woody) and the assigned DJ.
 
+### Potential Availability Triage
+
+**File:** `potential_availability.py`
+**Launch:** `python3 potential_availability.py`
+
+Read-only triage of open inquiries. Reads every thread in the IMAP folder `INBOX.BIG FUN.Sales.Potential` (love2tap), pulls the event date and venue from each subject line, checks each date against the availability matrix, and prints + saves a sorted report. Saves a markdown copy to `~/Downloads/YYYY-MM-DD-potential-availability.md`.
+
+Subject parsing: primary format `(DOW MM-DD-YY Venue) ...` yields date + venue; a loose-date fallback (e.g. `8/7/2026`) catches corporate subjects with no venue; subjects with no parseable date are listed separately for manual check. Each resolved date reports spots open / FULL, DJs free to book, DJs free for backup, and booked/TBA/AAG counts. Dates not seeded in the matrix (matrix is seeded Fri-Mon, other dates added as needed) are flagged "not seeded in matrix." Loads each year's tab in a single API call. Uses `imap_credentials.json` (read-only) and `your-credentials.json`.
+
 ---
 
 ## 7. Core Module (dj_core.py)
@@ -252,8 +261,9 @@ Auto-deploys from the main branch on GitHub. Secrets are configured in the Strea
 |--------|---------|
 | Book Event | `osascript ~/Documents/projects/dj-availability-checker/gig_booking_manager.scpt` |
 | Cancel Booking | `osascript ~/Documents/projects/dj-availability-checker/cancel_booking.scpt` |
+| Potential Availability | `osascript ~/Documents/projects/dj-availability-checker/potential_availability.scpt` |
 
-Both AppleScripts accept `--dry-run` and `--test` flags as arguments.
+The Book Event and Cancel Booking AppleScripts accept `--dry-run` and `--test` flags as arguments.
 
 ### Key File Paths
 
@@ -299,5 +309,7 @@ Both AppleScripts accept `--dry-run` and `--test` flags as arguments.
 | backup_stats.py | Backup assignment counts per DJ per year |
 | **booking_comparator.py** | Cross-system discrepancy checker |
 | confirmation_forwarder.py | Email forward drafts via MailMaven |
+| **potential_availability.py** | Triage availability for open inquiries (Sales/Potential folder) |
+| potential_availability.scpt | AppleScript trigger for potential availability triage |
 | your-credentials.json | Google service account credentials (gitignored) |
 | sample_bookings/ | Test JSON files for dry-run testing |
