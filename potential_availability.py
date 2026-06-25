@@ -32,6 +32,7 @@ from dj_core import (
     analyze_availability,
     get_columns_for_year,
     get_column_indices,
+    get_gig_database_bookings,
 )
 
 colorama_init(autoreset=True)
@@ -198,6 +199,22 @@ def availability_for(date_obj, grids):
     }
 
 
+def booked_venues_for(date_obj):
+    """
+    Venue names we already have bookings at on date_obj (assigned + TBA),
+    deduped in order. Empty list if none / gig DB unavailable. AAG holds
+    and reservations without a gig-db record contribute nothing.
+    """
+    gig = get_gig_database_bookings(str(date_obj.year), date_obj.strftime("%m-%d"))
+    venues = []
+    records = list(gig.get("assigned", {}).values()) + gig.get("unassigned", [])
+    for info in records:
+        v = (info.get("venue") or "").strip()
+        if v and v not in venues:
+            venues.append(v)
+    return venues
+
+
 def build_report():
     subjects = fetch_subjects()
     service, spreadsheet, spreadsheet_id, _ = init_google_sheets_from_file(
@@ -221,6 +238,10 @@ def build_report():
     dated = []
     for date_obj, venue, subject in parsed:
         result = availability_for(date_obj, grids)
+        # For dates we already have bookings on, pull the venue(s) from the
+        # gig database (one API call, only when booked_count > 0).
+        if result.get("booked", 0) > 0:
+            result["booked_venues"] = booked_venues_for(date_obj)
         result["date_obj"] = date_obj
         result["venue"] = venue or "(venue not in subject)"
         result["subject"] = subject
@@ -247,9 +268,12 @@ def _detail_text(r):
     book = ", ".join(r["book"]) if r["book"] else "—"
     backup = ", ".join(r["backup"]) if r["backup"] else "—"
     aag = "yes" if r["aag"] else "no"
+    booked = str(r["booked"])
+    if r["booked"] and r.get("booked_venues"):
+        booked += f" ({'; '.join(r['booked_venues'])})"
     return (
         f"book: {book}   backup: {backup}   "
-        f"booked:{r['booked']} TBA:{r['tba']} AAG:{aag}"
+        f"booked:{booked} TBA:{r['tba']} AAG:{aag}"
     )
 
 
@@ -259,7 +283,7 @@ def print_terminal(dated, no_date):
     print(Style.DIM + f"{len(dated)} dated, {len(no_date)} need manual check" + Style.RESET_ALL)
     print()
     for r in dated:
-        date_str = r["date_obj"].strftime("%m-%d-%y")
+        date_str = r["date_obj"].strftime("%a %m-%d-%y")
         header = f"{Style.BRIGHT}{date_str}{Style.RESET_ALL}  {r['venue']}"
         print(f"{header}")
         print(f"    {_status_text(r, color=True)}   {_detail_text(r)}".rstrip())
@@ -284,15 +308,18 @@ def write_markdown(dated, no_date):
         "|------|-------|--------|--------------|-----------------|--------|-----|-----|",
     ]
     for r in dated:
-        date_str = r["date_obj"].strftime("%m-%d-%y")
+        date_str = r["date_obj"].strftime("%a %m-%d-%y")
         status = _status_text(r, color=False)
         if r["status"] in ("open", "full"):
             book = ", ".join(r["book"]) if r["book"] else "—"
             backup = ", ".join(r["backup"]) if r["backup"] else "—"
             aag = "yes" if r["aag"] else "no"
+            booked = str(r["booked"])
+            if r["booked"] and r.get("booked_venues"):
+                booked += f" ({'; '.join(r['booked_venues'])})"
             lines.append(
                 f"| {date_str} | {r['venue']} | {status} | {book} | {backup} "
-                f"| {r['booked']} | {r['tba']} | {aag} |"
+                f"| {booked} | {r['tba']} | {aag} |"
             )
         else:
             lines.append(
