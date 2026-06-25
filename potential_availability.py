@@ -261,6 +261,24 @@ def _status_text(r, color=False):
     return f"{Fore.YELLOW}{note}{Style.RESET_ALL}" if color else note
 
 
+# HTML colors for the saved markdown (renders in Obsidian / Typora / Marked).
+MD_GREEN = "#1a8a1a"
+MD_RED = "#c0392b"
+MD_AMBER = "#c08a00"
+
+
+def _md_span(text, color):
+    return f'<span style="color:{color}">{text}</span>'
+
+
+def _status_html(r):
+    if r["status"] == "open":
+        return _md_span(f"✅ {r['spots']} open", MD_GREEN)
+    if r["status"] == "full":
+        return _md_span("❌ FULL", MD_RED)
+    return _md_span(f"⚠️ {r.get('note', r['status'])}", MD_AMBER)
+
+
 def _detail_text(r):
     """book / backup / counts suffix; only for dates that resolved in matrix."""
     if r["status"] not in ("open", "full"):
@@ -309,14 +327,16 @@ def write_markdown(dated, no_date):
     ]
     for r in dated:
         date_str = r["date_obj"].strftime("%a %m-%d-%y")
-        status = _status_text(r, color=False)
+        status = _status_html(r)
         if r["status"] in ("open", "full"):
             book = ", ".join(r["book"]) if r["book"] else "—"
             backup = ", ".join(r["backup"]) if r["backup"] else "—"
             aag = "yes" if r["aag"] else "no"
             booked = str(r["booked"])
             if r["booked"] and r.get("booked_venues"):
-                booked += f" ({'; '.join(r['booked_venues'])})"
+                booked += " " + _md_span(
+                    f"({'; '.join(r['booked_venues'])})", MD_AMBER
+                )
             lines.append(
                 f"| {date_str} | {r['venue']} | {status} | {book} | {backup} "
                 f"| {booked} | {r['tba']} | {aag} |"
