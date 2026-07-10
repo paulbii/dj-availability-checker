@@ -273,6 +273,12 @@ def generate_html(roster):
       color: #6b6158;
     }}
 
+    header .updated {{
+      margin-top: 0.5rem;
+      font-size: 0.8rem;
+      color: #9a9088;
+    }}
+
     h2 {{
       font-family: 'Libre Baskerville', serif;
       font-size: 1.35rem;
@@ -353,11 +359,9 @@ def generate_html(roster):
     <header>
       <h1>BIG FUN Disc Jockeys</h1>
       <p>Nestldown Event Roster</p>
+      <p class="updated">Updated {updated}</p>
     </header>
     {body_content}
-    <footer>
-      Last updated {updated}
-    </footer>
   </div>
 </body>
 </html>"""

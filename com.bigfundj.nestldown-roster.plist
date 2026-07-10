@@ -6,8 +6,7 @@
     <string>com.bigfundj.nestldown-roster</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/paulburchfield/miniconda3/bin/python3</string>
-        <string>/Users/paulburchfield/Documents/projects/dj-availability-checker/nestldown_roster.py</string>
+        <string>/Users/paulburchfield/Documents/projects/dj-availability-checker/run_nestldown_roster.sh</string>
     </array>
     <key>StartCalendarInterval</key>
     <dict>
