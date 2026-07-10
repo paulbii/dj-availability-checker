@@ -43,6 +43,7 @@ from gig_booking_manager import (
     parse_booking_data,
     normalize_event_type,
     show_warning_dialog,
+    show_notification,
     get_backup_title,
     extract_client_first_names,
     is_setup_booking,
@@ -399,6 +400,10 @@ class BookingCanceller:
 
         # ── Check for turned-away inquiries ──
         self._check_turned_away(date_obj, year)
+
+        # ── Notify (production only) ──
+        if not self.dry_run:
+            show_notification("Cancel Booking", "\n".join(self.actions))
 
         return True
 

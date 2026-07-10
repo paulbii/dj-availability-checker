@@ -47,3 +47,6 @@ output/*.html
 NOTES.md
 TODO.md
 scratch/
+
+# === Edit backups (osacompile pre-edit snapshots) ===
+*.prebak-*
