@@ -18,6 +18,8 @@ venv/
 *.egg-info/
 dist/
 build/
+release/
+*.spec
 
 # === IDEs ===
 .vscode/
