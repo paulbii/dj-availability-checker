@@ -669,6 +669,25 @@ def init_google_sheets_from_dict(credentials_dict):
     return service, spreadsheet, SPREADSHEET_ID, client
 
 
+def init_google_sheets_auto():
+    """Initialize Google Sheets from the best available credential source.
+
+    Tries the macOS Keychain first (service 'bigfun-google-service-account',
+    account 'paul') so frozen .app bundles work from any directory, then
+    falls back to your-credentials.json in the working directory (terminal
+    and Streamlit tools are unaffected).
+    """
+    import json
+    try:
+        import keyring
+        blob = keyring.get_password("bigfun-google-service-account", "paul")
+    except Exception:
+        blob = None
+    if blob:
+        return init_google_sheets_from_dict(json.loads(blob))
+    return init_google_sheets_from_file()
+
+
 def get_column_indices(column_letters):
     """Convert column letters to zero-based indices"""
     return {label: ord(col) - ord('A') for col, label in column_letters.items()}

@@ -13,7 +13,7 @@ import calendar
 
 # Import core functionality (same as check_dj.py)
 from dj_core import (
-    init_google_sheets_from_file,
+    init_google_sheets_auto,
     get_date_availability_data,
     get_venue_inquiries_for_date,
     get_full_inquiries_for_date,
@@ -642,7 +642,7 @@ class Api:
         """Initialize Google Sheets connection."""
         try:
             self.service, self.spreadsheet, self.spreadsheet_id, self.client = (
-                init_google_sheets_from_file()
+                init_google_sheets_auto()
             )
         except Exception as e:
             print(f"Error connecting to Google Sheets: {e}")
