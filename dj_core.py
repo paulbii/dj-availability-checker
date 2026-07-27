@@ -1248,14 +1248,17 @@ def get_date_availability_data(sheet_name, month_day, service, spreadsheet, spre
         return {'error': 'worksheet_not_found'}
 
 
-def get_venue_inquiries_for_date(event_date_str, client):
+def get_venue_inquiries_for_date(event_date_str, client, year=None):
     """
     Get venue inquiry information for a specific date
-    
+
     Args:
         event_date_str: Date string in format like "Fri 1/3" or "1/3/2026"
         client: Authorized gspread client
-    
+        year: Optional year (int) to match against. If None, matches month/day
+            only (legacy behavior). Pass the year so a date view only shows that
+            year's inquiries, not every year sharing the same MM/DD.
+
     Returns:
         dict with 'booked' and 'not_booked' lists of venues
     """
@@ -1303,6 +1306,10 @@ def get_venue_inquiries_for_date(event_date_str, client):
                 if not parsed_event:
                     continue
                 
+                # Skip rows from a different year when a year is specified.
+                if year is not None and parsed_event.year != year:
+                    continue
+
                 # Check if this row matches our target date (month and day only)
                 if (parsed_event.month, parsed_event.day) == (target_month, target_day):
                     venue = row.get('Venue (if known)', '').strip()

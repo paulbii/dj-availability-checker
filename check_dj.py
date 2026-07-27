@@ -165,7 +165,7 @@ def check_availability(sheet_name, month_day_to_check, service, spreadsheet, spr
     unassigned_bookings = gig_bookings.get('unassigned', [])
     
     # Get venue inquiries for this date
-    venue_info = get_venue_inquiries_for_date(selected_data['Date'], client)
+    venue_info = get_venue_inquiries_for_date(selected_data['Date'], client, year=int(sheet_name))
     
     response = ["\n" + "=" * 50]
     response.append(f"Year: {Back.WHITE}{Fore.BLACK}{Style.BRIGHT}{sheet_name}{Style.RESET_ALL}")

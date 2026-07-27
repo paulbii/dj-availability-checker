@@ -767,7 +767,7 @@ class Api:
             assigned_bookings = gig_bookings.get('assigned', {})
             unassigned_bookings = gig_bookings.get('unassigned', [])
 
-            venue_info = get_venue_inquiries_for_date(selected_data['Date'], self.client)
+            venue_info = get_venue_inquiries_for_date(selected_data['Date'], self.client, year=int(self.sheet_name))
 
             year_int = int(self.sheet_name)
             lines = []

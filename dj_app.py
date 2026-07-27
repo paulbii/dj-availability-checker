@@ -199,7 +199,7 @@ def tab_check_date(year, service, spreadsheet, spreadsheet_id, client):
                     st.error(f"Worksheet '{year}' not found")
             else:
                 st.session_state['single_result'] = result
-                venue_info = get_venue_inquiries_for_date(result['formatted_date'], client)
+                venue_info = get_venue_inquiries_for_date(result['formatted_date'], client, year=int(year))
                 st.session_state['single_venue_info'] = venue_info
 
     # Display results
