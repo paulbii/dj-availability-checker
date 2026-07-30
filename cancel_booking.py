@@ -49,51 +49,135 @@ from gig_booking_manager import (
     is_setup_booking,
     setup_helper_short,
     setup_event_bracket,
+    primary_event_title,
 )
 
 
 # ── Calendar deletion ────────────────────────────────────────────────────────
+#
+# The whose-clause scan is inherently slow (Calendar.app walks the entire Gigs
+# calendar), so the timeout is generous. 30s was not enough: on 2026-07-29 the
+# delete timed out and was misreported as "no events found."
+CALENDAR_TIMEOUT = 180
 
-def delete_booking_calendar_event(date_obj, initials_bracket):
+
+def _run_calendar_delete(script):
+    """
+    Run a deletion AppleScript that speaks the result protocol:
+        DELETED:<n>          — n events deleted
+        NONE                 — nothing matched at all
+        FOUND:<t1>||<t2>...  — candidates found, none deleted
+
+    Returns (status, payload):
+        ("deleted", n) | ("not_found", 0) | ("ambiguous", [titles]) | ("error", msg)
+    A timeout or osascript failure is ALWAYS ("error", ...) — never "not_found".
+    """
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True, text=True, timeout=CALENDAR_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return ("error", f"Calendar query timed out after {CALENDAR_TIMEOUT}s")
+    except Exception as e:
+        return ("error", str(e))
+
+    if result.returncode != 0:
+        return ("error", result.stderr.strip() or f"osascript exit {result.returncode}")
+
+    out = result.stdout.strip()
+    if out.startswith("DELETED:"):
+        count = out[len("DELETED:"):]
+        if count.isdigit():
+            return ("deleted", int(count))
+        return ("error", f"unparseable count in {out!r}")
+    if out == "NONE":
+        return ("not_found", 0)
+    if out.startswith("FOUND:"):
+        titles = [t for t in out[len("FOUND:"):].split("||") if t]
+        return ("ambiguous", titles)
+    return ("error", f"unexpected osascript output: {out!r}")
+
+
+def acceptable_event_titles(booking):
+    """
+    Every title the booking's calendar event may legitimately carry.
+
+    Always the title gig_booking_manager would create today. When the client
+    reads "A and B", also the "B and A" variant: the 10/16/2026 cancellation
+    showed FileMaker's name order can differ from the order at booking time
+    ("Jaylin and Julie" vs the event's "Julie and Jaylin"). Names with more
+    than one "and" are left alone — permuting them would guess.
+    """
+    titles = [primary_event_title(booking)]
+
+    parts = booking["client_display"].split(" and ")
+    if len(parts) == 2:
+        swapped = dict(booking)
+        swapped["client_display"] = f"{parts[1]} and {parts[0]}"
+        titles.append(primary_event_title(swapped))
+
+    return titles
+
+
+def delete_booking_calendar_event(date_obj, initials_bracket, expected_titles):
     """
     Delete the booking calendar event for a DJ on a given date.
-    Matches events by date and DJ initials bracket (e.g., [PB]).
-    Skips events containing 'BACKUP DJ' or 'Hold to DJ'.
-    Returns the count of deleted events.
+
+    Deletes only events whose title EXACTLY matches one of expected_titles
+    (from acceptable_event_titles). Events that merely share the initials
+    bracket — a second booking for the same DJ that day — are reported back,
+    never deleted. BACKUP DJ / Hold to DJ events are excluded from that
+    report; they are never deletion candidates here.
+
+    Returns (status, payload) per _run_calendar_delete.
     """
     date_str = date_obj.strftime("%B %d, %Y")  # "March 28, 2026"
+    escaped = [t.replace("\\", "\\\\").replace('"', '\\"') for t in expected_titles]
+    titles_list = "{" + ", ".join(f'"{t}"' for t in escaped) + "}"
 
     script = f'''
     tell application "Calendar"
         tell calendar "{CALENDAR_NAME}"
+            set okTitles to {titles_list}
             set matchingEvents to (every event whose start date >= date "{date_str} 12:00:00 AM" and start date < date "{date_str} 11:59:59 PM" and summary contains "{initials_bracket}")
-            set deletedCount to 0
+            set exactEvents to {{}}
+            set otherTitles to {{}}
             repeat with anEvent in matchingEvents
                 set eventTitle to summary of anEvent
-                if eventTitle does not contain "BACKUP DJ" and eventTitle does not contain "Hold to DJ" then
-                    delete anEvent
-                    set deletedCount to deletedCount + 1
+                if okTitles contains eventTitle then
+                    set end of exactEvents to anEvent
+                else if eventTitle does not contain "BACKUP DJ" and eventTitle does not contain "Hold to DJ" then
+                    set end of otherTitles to eventTitle
                 end if
             end repeat
-            return deletedCount
+            if (count of exactEvents) > 0 then
+                repeat with anEvent in exactEvents
+                    delete anEvent
+                end repeat
+                return "DELETED:" & (count of exactEvents)
+            else if (count of otherTitles) > 0 then
+                set AppleScript's text item delimiters to "||"
+                set joined to otherTitles as text
+                set AppleScript's text item delimiters to ""
+                return "FOUND:" & joined
+            else
+                return "NONE"
+            end if
         end tell
     end tell
     '''
-
-    try:
-        result = subprocess.run(
-            ["osascript", "-e", script],
-            capture_output=True, text=True, timeout=30,
-        )
-        count = result.stdout.strip()
-        return int(count) if count.isdigit() else 0
-    except (subprocess.TimeoutExpired, Exception) as e:
-        print(f"  WARNING: Could not delete calendar event: {e}")
-        return 0
+    return _run_calendar_delete(script)
 
 
 def delete_backup_calendar_event(date_obj, backup_dj):
-    """Delete the backup DJ's all-day calendar event on a given date."""
+    """
+    Delete the backup DJ's all-day calendar event on a given date.
+
+    Backup titles are formulaic ('BACKUP DJ' + initials), so the contains
+    match stays; only the timeout and error reporting changed.
+    Returns (status, payload) per _run_calendar_delete.
+    """
     date_str = date_obj.strftime("%B %d, %Y")
     backup_initials = f"[{get_dj_initials(backup_dj)}]"
 
@@ -101,25 +185,19 @@ def delete_backup_calendar_event(date_obj, backup_dj):
     tell application "Calendar"
         tell calendar "{CALENDAR_NAME}"
             set backupEvents to (every event whose start date >= date "{date_str} 12:00:00 AM" and start date < date "{date_str} 11:59:59 PM" and summary contains "BACKUP DJ" and summary contains "{backup_initials}")
-            set deletedCount to count of backupEvents
-            repeat with anEvent in backupEvents
-                delete anEvent
-            end repeat
-            return deletedCount
+            if (count of backupEvents) > 0 then
+                set deletedCount to count of backupEvents
+                repeat with anEvent in backupEvents
+                    delete anEvent
+                end repeat
+                return "DELETED:" & deletedCount
+            else
+                return "NONE"
+            end if
         end tell
     end tell
     '''
-
-    try:
-        result = subprocess.run(
-            ["osascript", "-e", script],
-            capture_output=True, text=True, timeout=30,
-        )
-        count = result.stdout.strip()
-        return int(count) if count.isdigit() else 0
-    except (subprocess.TimeoutExpired, Exception) as e:
-        print(f"  WARNING: Could not delete backup calendar event: {e}")
-        return 0
+    return _run_calendar_delete(script)
 
 
 # ── Backup DJ detection ──────────────────────────────────────────────────────
@@ -182,14 +260,90 @@ def ask_remove_backup(date_display, backup_dj):
     return button returned of result
     '''
 
+    # Long timeout: this decides a matrix write. If it still expires, say the
+    # answer was defaulted rather than chosen.
     try:
         result = subprocess.run(
             ["osascript", "-e", script],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True, text=True, timeout=1800,
         )
         return result.stdout.strip() == "Remove Backup"
+    except subprocess.TimeoutExpired:
+        print("  WARNING: Backup dialog expired unanswered — keeping backup by default.")
+        return False
     except Exception:
         return False
+
+
+# ── Turned-away inquiries dialog ─────────────────────────────────────────────
+
+def show_turned_away_dialog(date_display, inquiries, older_count=0, error=None):
+    """
+    Show the turned-away inquiries for a freed-up date.
+
+    Always shows, even with nothing to report, so that "no one was turned
+    away" is visibly different from "the lookup broke." Read-only, so it
+    runs in dry-run too.
+    """
+    lines = [date_display, ""]
+
+    if error:
+        lines.append("Could not check the inquiry tracker:")
+        lines.append(f"    {error}")
+        lines.append("")
+        lines.append("Check the tracker by hand before assuming no one")
+        lines.append("was turned away on this date.")
+    elif inquiries:
+        for r in inquiries:
+            tier = r.get("tier", 3)
+            label = {1: "REACH OUT", 2: "MAYBE"}.get(tier, "STALE")
+            bullet = "●" if tier == 1 else "○"
+            venue = r.get("venue") or "(no venue)"
+            lines.append(f"{bullet} {label}: {venue}")
+
+            age = r.get("inquiry_age_label", "")
+            inquiry_date = r.get("inquiry_date", "")
+            detail = ""
+            if age:
+                detail = f"inquired {age}"
+            if inquiry_date and inquiry_date != "—":
+                detail = f"{detail} ({inquiry_date})" if detail else inquiry_date
+            if detail:
+                lines.append(f"    {detail}")
+            lines.append("")
+        if older_count:
+            lines.append(f"({older_count} more, turned away over 60 days ago,")
+            lines.append("not shown)")
+    else:
+        lines.append("No one was turned away on this date.")
+        if older_count:
+            lines.append("")
+            lines.append(f"({older_count} turned away over 60 days ago,")
+            lines.append("not shown)")
+
+    msg = "\\n".join(lines).rstrip("\\n").replace('"', '\\"')
+
+    # System Events owns the dialog so it comes to the front rather than
+    # opening behind whatever window has focus.
+    script = f'''
+    tell application "System Events"
+        activate
+        display dialog "{msg}" with title "Turned-Away Inquiries" buttons {{"OK"}} default button "OK"
+    end tell
+    '''
+
+    # Generous timeout: this dialog is the only place these inquiries surface
+    # during a Stream Deck run, so it needs to survive stepping away from the
+    # desk. If it does expire, the same list is still in the run log.
+    try:
+        subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True, text=True, timeout=1800,
+        )
+    except subprocess.TimeoutExpired:
+        print("  WARNING: Turned-away dialog expired unacknowledged (see list above).")
+    except Exception as e:
+        print(f"  WARNING: Could not show turned-away dialog: {e}")
 
 
 # ── Main cancellation flow ───────────────────────────────────────────────────
@@ -342,28 +496,72 @@ class BookingCanceller:
 
         # ── Delete calendar events ──
         print("  [5/6] Cleaning up calendar...")
+        expected_titles = acceptable_event_titles(booking)
+        expected_title = expected_titles[0]
+        calendar_failed = False
 
         if self.dry_run:
-            print(f"  [DRY RUN] Would delete {initials_bracket} event on {date_display}")
-            self.log(f"Calendar: would delete {initials_bracket} event")
+            shown = " or ".join(f'"{t}"' for t in expected_titles)
+            print(f"  [DRY RUN] Would delete event titled {shown} on {date_display}")
+            self.log(f"Calendar: would delete \"{expected_title}\"")
             if backup_dj:
                 print(f"  [DRY RUN] Would consider deleting backup event for {backup_dj}")
         else:
-            deleted = delete_booking_calendar_event(date_obj, initials_bracket)
-            if deleted:
-                print(f"  ✓ Deleted {deleted} calendar event(s) for {initials_bracket}")
-                self.log(f"Calendar: deleted {deleted} event(s) for {initials_bracket}")
-            else:
-                print(f"  ⚠️  No calendar events found for {initials_bracket} on {date_display}")
-                self.log(f"Calendar: no events found for {initials_bracket}")
+            status, payload = delete_booking_calendar_event(
+                date_obj, initials_bracket, expected_titles)
+
+            if status == "deleted":
+                print(f"  ✓ Deleted {payload} calendar event(s): \"{expected_title}\"")
+                self.log(f"Calendar: deleted {payload} event(s) \"{expected_title}\"")
+            elif status == "not_found":
+                print(f"  ⚠️  No {initials_bracket} events on {date_display} — nothing deleted")
+                self.log(f"Calendar: no {initials_bracket} events found (nothing deleted)")
+            elif status == "ambiguous":
+                calendar_failed = True
+                titles = "\n".join(f"  • {t}" for t in payload)
+                msg = (
+                    f"No event titled \"{expected_title}\" on {date_display}.\n\n"
+                    f"Found instead:\n{titles}\n\n"
+                    f"NOTHING was deleted. If one of these is this booking "
+                    f"(renamed?), delete it in Calendar by hand."
+                )
+                print(f"  ⚠️  CALENDAR NOT UPDATED — exact title not found; "
+                      f"{len(payload)} other {initials_bracket} event(s) left alone")
+                self.log(f"⚠️ CALENDAR NOT UPDATED: \"{expected_title}\" not found; "
+                         f"left alone: {', '.join(payload)}")
+                show_warning_dialog(f"Cancel Booking — Calendar:\n\n{msg}")
+            else:  # error
+                calendar_failed = True
+                print(f"  ⚠️  CALENDAR NOT UPDATED — {payload}")
+                self.log(f"⚠️ CALENDAR NOT UPDATED ({payload}) — "
+                         f"delete \"{expected_title}\" on {date_display} by hand")
+                show_warning_dialog(
+                    f"Cancel Booking — Calendar:\n\n"
+                    f"Could not delete the calendar event:\n{payload}\n\n"
+                    f"The matrix was already updated. Delete "
+                    f"\"{expected_title}\" on {date_display} in Calendar by hand, "
+                    f"then run the crosscheck."
+                )
 
             if remove_backup and backup_dj:
-                backup_deleted = delete_backup_calendar_event(date_obj, backup_dj)
-                if backup_deleted:
+                b_status, b_payload = delete_backup_calendar_event(date_obj, backup_dj)
+                if b_status == "deleted":
                     print(f"  ✓ Deleted backup event for {backup_dj}")
                     self.log(f"Calendar: deleted backup event for {backup_dj}")
-                else:
+                elif b_status == "not_found":
                     print(f"  ⚠️  No backup calendar event found for {backup_dj}")
+                    self.log(f"Calendar: no backup event found for {backup_dj}")
+                else:
+                    calendar_failed = True
+                    print(f"  ⚠️  BACKUP EVENT NOT DELETED — {b_payload}")
+                    self.log(f"⚠️ BACKUP EVENT NOT DELETED ({b_payload}) — "
+                             f"remove {backup_dj}'s backup event on {date_display} by hand")
+                    show_warning_dialog(
+                        f"Cancel Booking — Calendar:\n\n"
+                        f"Backup matrix cell was cleared, but {backup_dj}'s backup "
+                        f"calendar event on {date_display} could not be deleted:\n"
+                        f"{b_payload}\n\nRemove it in Calendar by hand."
+                    )
 
         print()
 
@@ -371,6 +569,11 @@ class BookingCanceller:
         print("  [6/6] Cleaning up nurture emails...")
         self._cancel_nurture_emails(booking, date_display)
         print()
+
+        # ── Check for turned-away inquiries ──
+        # Before the form, so the browser tab is the last thing on screen
+        # instead of a dialog fighting Safari for focus.
+        self._check_turned_away(date_obj, year)
 
         # ── Open Google Form ──
         # A setup was never an inquiry/booking in the tracker (gig_booking_manager
@@ -398,14 +601,12 @@ class BookingCanceller:
             print(f"  • {action}")
         print()
 
-        # ── Check for turned-away inquiries ──
-        self._check_turned_away(date_obj, year)
-
         # ── Notify (production only) ──
         if not self.dry_run:
-            show_notification("Cancel Booking", "\n".join(self.actions))
+            title = "⚠️ Cancel Booking — CHECK CALENDAR" if calendar_failed else "Cancel Booking"
+            show_notification(title, "\n".join(self.actions))
 
-        return True
+        return not calendar_failed
 
     def _cancel_nurture_emails(self, booking, date_display):
         """Mark any pending nurture emails for this booking as skipped."""
@@ -465,14 +666,22 @@ class BookingCanceller:
             self.log(f"Nurture: cleanup failed ({e})")
 
     def _check_turned_away(self, date_obj, year):
-        """Check for inquiries turned away (Full) on this date within 60 days."""
+        """
+        Check for inquiries turned away (Full) on this date within 60 days.
+
+        The dialog always shows, including when there is nothing to report.
+        A silent result is indistinguishable from a failure, which defeats
+        the point of surfacing this at all.
+        """
         date_str = date_obj.strftime("%-m/%-d/%Y")
+        date_display = date_obj.strftime("%a %-m/%-d/%Y")
+
         try:
             results = get_full_inquiries_for_date(date_str, self.sheets.gc, year)
-        except Exception:
-            return
-
-        if not results:
+        except Exception as e:
+            print(f"  WARNING: Turned-away lookup failed: {e}")
+            self.log(f"Turned-away: lookup failed ({e})")
+            show_turned_away_dialog(date_display, [], error=str(e))
             return
 
         # Filter to inquiries where decision date was within the last 60 days
@@ -492,27 +701,35 @@ class BookingCanceller:
             if parsed and parsed >= cutoff:
                 recent.append(r)
 
-        if not recent:
-            return
-
         print(f"{'=' * 60}")
         print(f"  TURNED-AWAY INQUIRIES FOR THIS DATE")
         print(f"{'=' * 60}")
-        for r in recent:
-            tier = r.get('tier', 3)
-            if tier == 1:
-                label = "REACH OUT"
-            elif tier == 2:
-                label = "MAYBE"
-            else:
-                label = "STALE"
-            venue = r.get('venue', '(no venue)')
-            age = r.get('inquiry_age_label', '')
-            inquiry_date = r.get('inquiry_date', '')
-            age_part = f" -- inquired {age}" if age else ""
-            date_part = f" ({inquiry_date})" if inquiry_date and inquiry_date != '—' else ""
-            print(f"  {'●' if tier == 1 else '○'} {label}: {venue}{age_part}{date_part}")
+        if recent:
+            for r in recent:
+                tier = r.get('tier', 3)
+                if tier == 1:
+                    label = "REACH OUT"
+                elif tier == 2:
+                    label = "MAYBE"
+                else:
+                    label = "STALE"
+                venue = r.get('venue') or '(no venue)'
+                age = r.get('inquiry_age_label', '')
+                inquiry_date = r.get('inquiry_date', '')
+                age_part = f" -- inquired {age}" if age else ""
+                date_part = f" ({inquiry_date})" if inquiry_date and inquiry_date != '—' else ""
+                print(f"  {'●' if tier == 1 else '○'} {label}: {venue}{age_part}{date_part}")
+            self.log(f"Turned-away: {len(recent)} inquiry(ies) found")
+        else:
+            older = len(results) - len(recent)
+            extra = f" ({older} older than 60 days)" if older else ""
+            print(f"  None within 60 days{extra}.")
+            self.log("Turned-away: none")
         print()
+
+        # Stream Deck runs this headless with stdout going to a log file, so the
+        # printout above is invisible in normal use. Surface it as a dialog.
+        show_turned_away_dialog(date_display, recent, older_count=len(results) - len(recent))
 
 
 def main():
