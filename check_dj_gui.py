@@ -6,6 +6,7 @@ Requires: pip install pywebview
 
 import webview
 import json
+import html as _html
 import subprocess
 import threading
 from datetime import datetime, timedelta
@@ -28,6 +29,7 @@ from dj_core import (
     KNOWN_CELL_VALUES,
     get_gig_database_bookings,
     setup_status_text,
+    get_venue_cautions,
 )
 
 
@@ -171,6 +173,23 @@ HTML = """
     font-size: 11px;
     color: var(--text-dim);
     border-top: 1px solid var(--border);
+  }
+  .sidebar .caution-info {
+    padding: 10px 20px 12px;
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--text-dim);
+    border-top: 1px solid var(--border);
+  }
+  .sidebar .caution-info:empty { display: none; }
+  .sidebar .caution-info .caution-label {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--yellow);
   }
 
   /* ── Content Area ── */
@@ -362,6 +381,7 @@ HTML = """
       <span class="icon">📋</span> Turned Away
     </button>
     <div class="spacer"></div>
+    <div class="caution-info" id="cautionVenues"><!--CAUTION_VENUES--></div>
     <div class="cache-info" id="cacheInfo"></div>
   </div>
 
@@ -1221,11 +1241,26 @@ class Api:
 
 # ── Entry Point ──────────────────────────────────────────────────────────────
 
+def _render_html():
+    """HTML with the venue caution list injected into the sidebar footnote.
+
+    Substituted here rather than in the template because HTML is a plain
+    string full of CSS braces, so it cannot be an f-string. An empty list
+    leaves the placeholder blank and :empty hides the divider.
+    """
+    cautions = get_venue_cautions()
+    block = ""
+    if cautions:
+        block = ('<span class="caution-label">Caution venues</span>'
+                 + "<br>".join(_html.escape(v) for v in cautions))
+    return HTML.replace("<!--CAUTION_VENUES-->", block)
+
+
 def main(year="2026"):
     api = Api(year)
     window = webview.create_window(
         f"DJ Availability — {year}",
-        html=HTML,
+        html=_render_html(),
         js_api=api,
         width=960,
         height=700,

@@ -9,6 +9,7 @@ import sys
 from datetime import datetime, timedelta
 import calendar
 import subprocess
+import textwrap
 
 # Terminal colors route through the shared palette (256-color) so the terminal
 # matches the GUI and web. Color is off when stdout isn't a TTY or NO_COLOR is set.
@@ -46,6 +47,7 @@ from dj_core import (
     init_google_sheets_from_file,
     get_date_availability_data,
     get_venue_inquiries_for_date,
+    get_venue_cautions,
     get_full_inquiries_for_date,
     get_nearby_bookings_for_dj,
     check_dj_availability,
@@ -282,6 +284,13 @@ def check_availability(sheet_name, month_day_to_check, service, spreadsheet, spr
     if venue_info and venue_info.get('not_booked'):
         response.append(f"\n{Fore.GOLD}INQUIRIES (not booked): {', '.join(venue_info['not_booked'])}{Style.RESET_ALL}")
     
+    # Venues we do not want to play (informational footnote, single-date only)
+    cautions = get_venue_cautions()
+    if cautions:
+        wrapped = textwrap.fill(", ".join(cautions), width=66,
+                                initial_indent="  ", subsequent_indent="  ")
+        response.append(f"\n{Fore.YELLOW}\u2691 CAUTION VENUES\n{wrapped}{Style.RESET_ALL}")
+
     # Show cache info if venue/gig database data was used
     cache_info = get_cache_info()
     if cache_info:

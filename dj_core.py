@@ -14,6 +14,7 @@ import html
 import requests
 from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 # Global variable to track when cache was first populated
 _cache_first_used = None
@@ -1246,6 +1247,26 @@ def get_date_availability_data(sheet_name, month_day, service, spreadsheet, spre
             return {'error': 'not_found', 'formatted_date': formatted_date}
     except gspread.exceptions.WorksheetNotFound:
         return {'error': 'worksheet_not_found'}
+
+
+# Venues we do not want to play. Lives outside the repo so the frozen .app
+# bundles read it without a PyInstaller rebuild (see build_apps.sh).
+VENUE_CAUTIONS_FILE = Path.home() / "Documents" / "BIG FUN" / "venue-cautions.txt"
+
+
+def get_venue_cautions():
+    """Venue names we do not want to play, read from VENUE_CAUTIONS_FILE.
+
+    One venue per line; blank lines and lines starting with # are skipped.
+    Returns [] if the file is missing or unreadable, so a machine without
+    the file behaves exactly as it did before.
+    """
+    try:
+        lines = VENUE_CAUTIONS_FILE.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    return [v for v in (line.strip() for line in lines)
+            if v and not v.startswith("#")]
 
 
 def get_venue_inquiries_for_date(event_date_str, client, year=None):
