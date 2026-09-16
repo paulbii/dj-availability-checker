@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 <!-- Features in development go here -->
 
+### Changed
+- **Setup days: no teardown padding on the calendar end.** Event Type = Setup now ends the
+  calendar event at the Gig DB end time; the start still gets the arrival offset. Before this,
+  every setup event carried the 60-minute pad and was hand-edited. (2026-09-16)
+
 ## [2026-02-05] - Gig Booking Manager Enhancements
 
 ### Added
