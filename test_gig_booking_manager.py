@@ -308,6 +308,36 @@ class TestTimeCalculations(unittest.TestCase):
         self.assertEqual(cal_end.hour, 23)
         self.assertEqual(cal_end.minute, 59)
 
+    def test_event_times_setup_no_teardown(self):
+        # Setup day: start still gets the arrival offset, end is the Gig DB
+        # end time as-is (no 60min teardown). Paul, 2026-09-16.
+        booking = {
+            "date": datetime(2026, 2, 2),
+            "start_time": "4:00",
+            "end_time": "10:00",
+            "sound_type": "Standard Speakers",
+            "has_ceremony": False,
+            "event_type": "Setup",
+        }
+        cal_start, cal_end = calculate_event_times(booking)
+        self.assertEqual((cal_start.hour, cal_start.minute), (14, 30))
+        self.assertEqual((cal_end.hour, cal_end.minute), (22, 0))
+
+    def test_event_times_setup_nestldown_no_teardown(self):
+        # Nestldown 6-hour setup: still no end padding.
+        booking = {
+            "date": datetime(2026, 2, 2),
+            "start_time": "4:00",
+            "end_time": "10:00",
+            "sound_type": "Standard Speakers",
+            "has_ceremony": False,
+            "event_type": "setup",
+            "venue_name": "Nestldown",
+        }
+        cal_start, cal_end = calculate_event_times(booking)
+        self.assertEqual((cal_start.hour, cal_start.minute), (14, 20))
+        self.assertEqual((cal_end.hour, cal_end.minute), (22, 0))
+
 
 # =============================================================================
 # Backup Eligibility Tests
