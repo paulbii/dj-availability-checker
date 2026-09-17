@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 <!-- Features in development go here -->
 
+### Fixed
+- **AM/PM guess for events ending 12:00-2:00.** The Gig DB has no AM/PM. An end of exactly
+  12:00 was always read as midnight (a 9-12 morning became 9 PM), and an end past midnight was
+  read as crossing noon (5:30-1:00 became 5:30 AM). Now, inside that window, a start of 8:00 or
+  earlier is an evening and a later start is a morning. From Henry's report of all 43 such
+  events 2023-2026: 35 right before, 41 after. Known misses: a 10pm-1am event, and a morning
+  starting at 8:00 sharp. Those still need a hand check. (2026-09-17)
+
 ### Changed
 - **Setup days: no teardown padding on the calendar end.** Event Type = Setup now ends the
   calendar event at the Gig DB end time; the start still gets the arrival offset. Before this,

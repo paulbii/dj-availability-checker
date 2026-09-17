@@ -266,6 +266,63 @@ class TestTimeCalculations(unittest.TestCase):
         self.assertEqual(start, (17, 0))
         self.assertEqual(end, (23, 59))
 
+    # --- AM/PM guess when the end is 12:00-2:00 (Henry's 2023-2026 report, 2026-09-16) ---
+    # Start 8:00 or earlier = evening (ends after midnight, capped 23:59).
+    # Start 8:30 or later = morning (ends at noon or early afternoon).
+
+    def test_12h_to_24h_morning_ending_at_noon(self):
+        # 9:00 - 12:00 → 9am - noon. Was read as 9pm - midnight (Sobrato setup 2026-02-02).
+        start, end = convert_times_to_24h("9:00", "12:00")
+        self.assertEqual(start, (9, 0))
+        self.assertEqual(end, (12, 0))
+
+    def test_12h_to_24h_evening_ending_past_midnight(self):
+        # 5:30 - 1:00 → 5:30pm - 1am, capped. Was read as 5:30am - 1pm.
+        start, end = convert_times_to_24h("5:30", "1:00")
+        self.assertEqual(start, (17, 30))
+        self.assertEqual(end, (23, 59))
+
+    def test_12h_to_24h_henry_report_time_pairs(self):
+        # Every distinct (start, end) pair in Henry's report, with the start he
+        # identified. Two known exceptions are left out on purpose: a 10pm-1am
+        # birthday (collides with four 10:40-1:00 lunches) and an 8am-noon
+        # corporate (8:00 sharp was an evening twice, a morning once).
+        cases = [
+            ("10:40", "1:00", (10, 40), (13, 0)),
+            ("8:30", "2:00", (8, 30), (14, 0)),
+            ("9:30", "1:30", (9, 30), (13, 30)),
+            ("9:30", "12:30", (9, 30), (12, 30)),
+            ("9:00", "12:30", (9, 0), (12, 30)),
+            ("9:00", "12:15", (9, 0), (12, 15)),
+            ("9:15", "12:15", (9, 15), (12, 15)),
+            ("10:30", "12:00", (10, 30), (12, 0)),
+            ("10:00", "12:00", (10, 0), (12, 0)),
+            ("10:00", "1:30", (10, 0), (13, 30)),
+            ("10:45", "2:00", (10, 45), (14, 0)),
+            ("11:00", "1:00", (11, 0), (13, 0)),
+            ("11:30", "1:00", (11, 30), (13, 0)),
+            ("12:00", "2:00", (12, 0), (14, 0)),
+            ("12:30", "1:30", (12, 30), (13, 30)),
+            ("4:00", "12:00", (16, 0), (23, 59)),
+            ("4:30", "12:00", (16, 30), (23, 59)),
+            ("5:30", "12:00", (17, 30), (23, 59)),
+            ("6:00", "12:00", (18, 0), (23, 59)),
+            ("7:30", "12:00", (19, 30), (23, 59)),
+            ("8:00", "12:00", (20, 0), (23, 59)),
+        ]
+        for s, e, want_start, want_end in cases:
+            with self.subTest(start=s, end=e):
+                start, end = convert_times_to_24h(s, e)
+                self.assertEqual(start, want_start)
+                self.assertEqual(end, want_end)
+
+    def test_12h_to_24h_rule_stays_inside_the_report_window(self):
+        # Ends after 2:00 were not in Henry's report, so they keep the old
+        # reading: 7:00 - 3:00 is still 7am - 3pm, not an evening.
+        start, end = convert_times_to_24h("7:00", "3:00")
+        self.assertEqual(start, (7, 0))
+        self.assertEqual(end, (15, 0))
+
     def test_event_times_standard_evening(self):
         booking = {
             "date": datetime(2026, 2, 21),

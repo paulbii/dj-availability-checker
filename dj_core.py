@@ -330,11 +330,17 @@ def calculate_arrival_offset(sound_type, has_ceremony):
 def convert_times_to_24h(start_str, end_str):
     """
     Convert 12-hour times (no AM/PM) to 24-hour (hour, minute) tuples.
-    Rules:
+
+    When the event crosses a 12 and ends between 12:00 and 2:00, the start
+    decides noon vs midnight (Henry's report of every such event 2023-2026,
+    43 events, 41 read correctly):
+      - Start 8:00 or earlier: evening → start PM, end after midnight, capped 23:59
+      - Start after 8:00: morning → start AM, end at noon or early afternoon
+    Known misses: a 10pm-1am event, and a morning that starts at 8:00 sharp.
+
+    Everything else:
       - Start > End numerically: crosses noon → start AM, end PM
-      - End = 12 and Start < 12: crosses noon at 12
       - Start ≤ End: both PM
-      - End = 12:00: midnight → cap at 23:59
     """
     def parse_hm(t):
         parts = t.strip().split(":")
@@ -348,7 +354,18 @@ def convert_times_to_24h(start_str, end_str):
     start_val = start_h * 60 + start_m
     end_val = end_h * 60 + end_m
 
-    if end_h == 12 and end_m == 0:
+    crosses_12 = (end_h == 12 and start_h < 12) or (start_val > end_val and start_h != 12)
+    ends_12_to_2 = end_h == 12 or end_val <= 2 * 60
+
+    if crosses_12 and ends_12_to_2:
+        if start_val <= 8 * 60:
+            start_24h = start_h + 12
+            end_24h = 23
+            end_m = 59
+        else:
+            start_24h = start_h
+            end_24h = 12 if end_h == 12 else end_h + 12
+    elif end_h == 12 and end_m == 0:
         start_24h = start_h + 12 if start_h != 12 else 12
         end_24h = 23
         end_m = 59
