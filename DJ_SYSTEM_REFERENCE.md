@@ -64,7 +64,7 @@ Browser-based version for team access (primarily for company owners). Same 6 tab
 Automates availability matrix and calendar updates when a new booking is confirmed in FileMaker.
 
 **Files:** `gig_booking_manager.py`, `gig_booking_manager.scpt`
-**Trigger:** Stream Deck button runs `osascript gig_booking_manager.scpt`
+**Trigger:** Stream Deck button runs `dj-checker-button gig_booking_manager.scpt` (see Stream Deck Buttons)
 **Flags:** `--dry-run` (validate only) | `--test` (calendar invites to paul@bigfundj.com) | `--credentials PATH`
 
 ### Workflow
@@ -104,7 +104,7 @@ After writing BOOKED to the matrix, the script checks if a backup is needed and 
 Reverses a booking: clears the matrix, deletes calendar events, optionally removes backup, logs to Google Form.
 
 **Files:** `cancel_booking.py`, `cancel_booking.scpt`
-**Trigger:** Stream Deck button runs `osascript cancel_booking.scpt`
+**Trigger:** Stream Deck button runs `dj-checker-button cancel_booking.scpt` (see Stream Deck Buttons)
 **Flags:** `--dry-run` | `--test` | `--credentials PATH`
 
 ### 5-Step Process
@@ -257,11 +257,17 @@ Auto-deploys from the main branch on GitHub. Secrets are configured in the Strea
 
 ### Stream Deck Buttons
 
-| Button | Command |
+| Button | Command (Run Shell Command) |
 |--------|---------|
-| Book Event | `osascript ~/Documents/projects/dj-availability-checker/gig_booking_manager.scpt` |
-| Cancel Booking | `osascript ~/Documents/projects/dj-availability-checker/cancel_booking.scpt` |
-| Potential Availability | `osascript ~/Documents/projects/dj-availability-checker/potential_availability.scpt` |
+| Book Event | `/Users/paulburchfield/bin/dj-checker-button gig_booking_manager.scpt` |
+| Cancel Booking | `/Users/paulburchfield/bin/dj-checker-button cancel_booking.scpt` |
+| Stefano Enforcer | `/Users/paulburchfield/bin/dj-checker-button stefano_maxed_enforcer.scpt` |
+| Nestldown Roster | `/Users/paulburchfield/bin/dj-checker-button run_nestldown_roster.scpt` |
+| Potential Availability | `/Users/paulburchfield/bin/dj-checker-button potential_availability.scpt` |
+
+**Why a launcher (2026-09-19).** This repo is under `~/Documents`, which iCloud evicts, sometimes within minutes. Stream Deck starts processes with iCloud downloading turned off, so an evicted file fails instead of downloading: `script error -36` for a `.scpt`, `[Errno 11] Resource deadlock avoided` for a `.py`. `~/bin/dj-checker-button` sits outside iCloud, turns downloading on, then runs `osascript <script>`; everything it spawns inherits the setting. Running a `.scpt` straight from Stream Deck (Run AppleScript, or `osascript ...` as a shell command) skips that and will fail whenever the file has gone cold. From Terminal, plain `osascript <script>` is fine.
+
+**The venv is outside iCloud for the same reason**, at `~/.local/share/dj-availability-checker/venv`; `.venv` in the repo is a symlink to it, so every `.venv/bin/python` path still works. macOS never downloads an evicted binary on exec, so a venv inside iCloud cannot be made reliable. To rebuild: create the venv at that path, reinstall, keep the symlink.
 
 The Book Event and Cancel Booking AppleScripts accept `--dry-run` and `--test` flags as arguments.
 
@@ -272,6 +278,7 @@ The Book Event and Cancel Booking AppleScripts accept `--dry-run` and `--test` f
 | Project directory | `~/Documents/projects/dj-availability-checker/` |
 | Credentials | `~/Documents/projects/dj-availability-checker/your-credentials.json` |
 | Python binary | `/Users/paulburchfield/miniconda3/bin/python3` |
+| Venv | `~/.local/share/dj-availability-checker/venv` (repo `.venv` is a symlink) |
 | Temp booking JSON | `/tmp/gig_booking.json` |
 | Sample bookings | `sample_bookings/` directory (test JSON files) |
 
