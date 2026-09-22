@@ -399,8 +399,10 @@ def calculate_event_times(booking):
     - Start = event start - arrival offset (90 or 120 minutes)
     - End = event end + 60 minutes (teardown), capped at 23:59
 
-    Setup days (Event Type = Setup): start rule unchanged, end is the
-    Gig DB end time as-is with no teardown padding.
+    Setup days (Event Type = Setup): no padding either side. The Gig DB
+    start is the arrival time and the end is when everyone leaves, so the
+    calendar event is exactly start to end (Paul, 2026-09-22; before that
+    only the end was unpadded).
     """
     if not booking["start_time"] or not booking["end_time"]:
         return None, None
@@ -432,7 +434,7 @@ def calculate_event_times(booking):
         cal_end = end_dt + timedelta(minutes=60)
 
     if booking.get("event_type", "").strip().lower() == "setup":
-        cal_end = end_dt
+        cal_start, cal_end = start_dt, end_dt
 
     midnight = booking["date"].replace(hour=23, minute=59)
     if cal_end > midnight:
