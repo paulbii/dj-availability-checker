@@ -311,6 +311,22 @@ def fetch_availability_matrix(year):
 # MASTER CALENDAR (live via icalBuddy)
 # =============================================================================
 
+# DJ initials bracket at the front of a calendar title: [PB], [WM/HK], [PB, WM].
+# Slash or comma between codes, optional spaces. Each code is 1-3 letters.
+DJ_BRACKET_RE = re.compile(r'\[([A-Za-z]{1,3}(?:\s*[/,]\s*[A-Za-z]{1,3})*)\]')
+
+
+def parse_dj_codes(title):
+    """
+    Return the DJ initials codes from a calendar title's bracket, or None if
+    the title has no DJ bracket. "[PB, WM] CASA" -> ["PB", "WM"].
+    """
+    match = DJ_BRACKET_RE.search(title)
+    if not match:
+        return None
+    return re.split(r'\s*[/,]\s*', match.group(1))
+
+
 def fetch_master_calendar(year):
     """
     Pull master calendar events directly via icalBuddy.
@@ -378,15 +394,11 @@ def fetch_master_calendar(year):
                 continue
 
             # Check if this is a title line with a DJ bracket code
-            # Handles single [PB], dual [WM/HK], and other formats
-            bracket_match = re.search(r'\[([A-Za-z]{1,3}(?:/[A-Za-z]{1,3})*)\]', stripped)
-            if bracket_match and not stripped[0].isdigit():
+            # Handles single [PB], dual [WM/HK] or [PB, WM], and other formats
+            dj_codes = parse_dj_codes(stripped)
+            if dj_codes and not stripped[0].isdigit():
                 is_backup = 'BACKUP' in stripped.upper()
                 is_hold = 'HOLD TO DJ' in stripped.upper()
-
-                # Title line — may contain multiple DJs separated by /
-                raw_codes = bracket_match.group(1)  # "PB" or "WM/HK"
-                dj_codes = raw_codes.split('/')
 
                 # Resolve each DJ code to a name
                 pending_djs = []
