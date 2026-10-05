@@ -16,7 +16,8 @@ from stefano_maxed_enforcer import (
     calculate_sync,
     calculate_calendar_repairs,
     compute_should_be_maxed,
-    parse_unavailable_calendar,
+    parse_unavailable_events,
+    fetch_unavailable_maxed,
     is_fss,
     adjacent_weekend_dates,
     parse_matrix_date,
@@ -251,26 +252,37 @@ class TestParseMatrixDate(unittest.TestCase):
         self.assertIsNone(parse_matrix_date("", 2026))
 
 
-class TestParseUnavailableCalendar(unittest.TestCase):
+class TestParseUnavailableEvents(unittest.TestCase):
     def test_extracts_sb_maxed_dates(self):
-        output = (
-            "[SB] MAXED OUT\n"
-            "    08/01\n"
-            "[PB] Christina and David\n"
-            "    08/02\n"
-            "[SB] MAXED OUT\n"
-            "    08/15\n"
-        )
-        present = parse_unavailable_calendar(output, 2026)
+        events = [
+            (date(2026, 8, 1), "[SB] MAXED OUT"),
+            (date(2026, 8, 2), "[PB] Christina and David"),
+            (date(2026, 8, 15), "[SB] MAXED OUT"),
+        ]
+        present = parse_unavailable_events(events, 2026)
         self.assertEqual(present, {date(2026, 8, 1), date(2026, 8, 15)})
 
     def test_ignores_other_sb_events(self):
         """[SB] events that aren't MAXED (e.g. PAID BACKUP) are not counted."""
-        output = "[SB] PAID BACKUP DJ\n    08/01\n"
-        self.assertEqual(parse_unavailable_calendar(output, 2026), set())
+        events = [(date(2026, 8, 1), "[SB] PAID BACKUP DJ")]
+        self.assertEqual(parse_unavailable_events(events, 2026), set())
 
-    def test_empty_output(self):
-        self.assertEqual(parse_unavailable_calendar("", 2026), set())
+    def test_ignores_events_starting_in_another_year(self):
+        events = [(date(2025, 12, 31), "[SB] MAXED OUT")]
+        self.assertEqual(parse_unavailable_events(events, 2026), set())
+
+    def test_empty(self):
+        self.assertEqual(parse_unavailable_events([], 2026), set())
+
+
+class TestFetchUnavailableMaxed(unittest.TestCase):
+    def test_read_failure_returns_none(self):
+        """None = couldn't read; callers fall back to matrix-only. Never an empty set."""
+        from unittest import mock
+        from calendar_read import CalendarReadError
+        with mock.patch("stefano_maxed_enforcer.calendar_read.fetch_events",
+                        side_effect=CalendarReadError("server down")):
+            self.assertIsNone(fetch_unavailable_maxed(2026))
 
 
 class TestCalculateCalendarRepairs(unittest.TestCase):

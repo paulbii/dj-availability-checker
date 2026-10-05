@@ -23,8 +23,7 @@ Usage:
 """
 
 import argparse
-import os
-import re
+import calendar_read
 import subprocess
 import sys
 from collections import defaultdict
@@ -269,69 +268,31 @@ def calculate_calendar_repairs(rows, should_be_maxed, cal_present, today):
 # CALENDAR
 # =============================================================================
 
-def parse_unavailable_calendar(output, year):
+def parse_unavailable_events(events, year):
     """
-    Parse icalBuddy output from the Unavailable calendar into a set of dates
-    that have an [SB] MAXED event.
+    Dates in `year` that have an [SB] MAXED event.
 
-    icalBuddy all-day format (title and date on separate lines):
-        [SB] MAXED OUT
-            08/01
+    events: list of (date, summary) from calendar_read.fetch_events.
     """
-    present = set()
-    pending = False  # True after a matching [SB] ... MAXED title line
-
-    for line in output.split("\n"):
-        stripped = line.strip()
-        if not stripped:
-            continue
-
-        # Title line: starts with a bracket code, not a digit
-        if stripped.startswith("[") and not stripped[0].isdigit():
-            up = stripped.upper()
-            pending = "[SB]" in up and "MAXED" in up
-            continue
-
-        # Date line following a matching title
-        if pending:
-            m = re.search(r"(\d{1,2})/(\d{1,2})", stripped)
-            if m:
-                present.add(date(int(year), int(m.group(1)), int(m.group(2))))
-            pending = False
-
-    return present
+    return {
+        d for d, summary in events
+        if d.year == int(year) and "[SB]" in summary.upper() and "MAXED" in summary.upper()
+    }
 
 
 def fetch_unavailable_maxed(year):
     """
-    Read the Unavailable calendar via icalBuddy and return the set of dates with
+    Read the Unavailable calendar over CalDAV and return the set of dates with
     an [SB] MAXED event. Returns None if the calendar can't be read, so callers
     fall back to matrix-only behavior.
     """
-    ical_buddy = "/opt/homebrew/bin/icalBuddy"
-    if not os.path.exists(ical_buddy):
-        print("  WARNING: icalBuddy not installed (brew install ical-buddy)")
-        print("  Skipping calendar verification -- matrix-only this run.")
-        return None
-
     try:
-        result = subprocess.run(
-            [ical_buddy, "-ic", "Unavailable",
-             "-eep", "notes,url,location,attendees",
-             "-b", "", "-nc", "-nrd",
-             "-df", "%m/%d",
-             "-iep", "title,datetime",
-             f"eventsFrom:{year}-01-01", f"to:{year}-12-31"],
-            capture_output=True, text=True, timeout=30,
-        )
-        if result.returncode != 0:
-            print(f"  WARNING: icalBuddy error: {result.stderr.strip()}")
-            print("  Skipping calendar verification -- matrix-only this run.")
-            return None
-        return parse_unavailable_calendar(result.stdout, year)
-    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+        events = calendar_read.fetch_events(
+            ["Unavailable"], date(int(year), 1, 1), date(int(year), 12, 31))
+    except calendar_read.CalendarReadError as e:
         print(f"  WARNING: calendar read failed ({e}); matrix-only this run.")
         return None
+    return parse_unavailable_events(events, year)
 
 def create_calendar_event(event_date, dry_run=False):
     """Create an all-day [SB] MAXED OUT event on the Unavailable calendar via AppleScript."""

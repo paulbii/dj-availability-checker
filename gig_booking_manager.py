@@ -33,6 +33,8 @@ from datetime import datetime, timedelta
 from urllib.parse import quote
 import re
 import calendar as cal_module
+import calendar_read
+from booking_comparator import parse_dj_codes
 
 # Import shared business logic from dj_core (single source of truth)
 from dj_core import (
@@ -782,44 +784,41 @@ class MockSheetsClient:
 
 
 # =============================================================================
-# CALENDAR OPERATIONS (via AppleScript)
+# CALENDAR OPERATIONS (reads via CalDAV, writes via AppleScript)
 # =============================================================================
 
 def check_calendar_conflicts(date_obj, initials_bracket):
     """
     Check if any events on the given date contain the DJ initials in the title.
-    Uses icalBuddy for fast calendar queries (AppleScript is too slow with large calendars).
+    Reads the Gigs and Unavailable calendars over CalDAV (calendar_read.py).
     Returns list of conflicting event titles, or empty list if clear.
+
+    Raises calendar_read.CalendarReadError if the calendar can't be read.
+    Callers must treat that as "not checked", never as "clear".
     """
-    date_str = date_obj.strftime("%Y-%m-%d")  # "2026-02-21"
+    day = date_obj.date() if isinstance(date_obj, datetime) else date_obj
+    events = calendar_read.fetch_events(["Gigs", "Unavailable"], day, day)
 
-    try:
-        result = subprocess.run(
-            ["/opt/homebrew/bin/icalBuddy", "-ic", "Gigs,Unavailable",
-             "-eep", "notes,url,location,attendees",
-             "-b", "", "-nc",
-             f"eventsFrom:{date_str}", f"to:{date_str}"],
-            capture_output=True, text=True, timeout=10,
-        )
-        # Non-booking event keywords — these contain DJ initials but aren't real booking conflicts
-        non_booking_keywords = ["DAD-DUTY", "BACKUP DJ", "HOLD"]
+    # Non-booking event keywords — these contain DJ initials but aren't real booking conflicts
+    non_booking_keywords = ["DAD-DUTY", "BACKUP DJ", "HOLD"]
 
-        conflicts = []
-        for line in result.stdout.strip().split("\n"):
-            line = line.strip()
-            if line and initials_bracket in line:
-                # Skip non-booking events (DAD-DUTY, BACKUP DJ, etc.)
-                line_upper = line.upper()
-                if any(kw in line_upper for kw in non_booking_keywords):
-                    continue
-                conflicts.append(line)
-        return conflicts
-    except FileNotFoundError:
-        print("  WARNING: icalBuddy not installed (brew install ical-buddy)")
-        return []
-    except subprocess.TimeoutExpired:
-        print("  WARNING: Calendar conflict check timed out")
-        return []
+    # Match on the parsed bracket so joint events count for each DJ:
+    # "[PB, WM] CASA" and "[WM/HK] Memorial" are both conflicts for [WM].
+    # Only events that start on this day count; one running past midnight
+    # from the day before is that day's booking.
+    code = initials_bracket.strip("[]").upper()
+    conflicts = []
+    for event_day, title in events:
+        if event_day != day:
+            continue
+        codes = parse_dj_codes(title) or []
+        if code in (c.upper() for c in codes):
+            # Skip non-booking events (DAD-DUTY, BACKUP DJ, etc.)
+            title_upper = title.upper()
+            if any(kw in title_upper for kw in non_booking_keywords):
+                continue
+            conflicts.append(title)
+    return conflicts
 
 
 def create_timed_calendar_event(booking, cal_start, cal_end, test_mode=False):
@@ -1438,9 +1437,22 @@ class GigBookingManager:
             matrix_count = count_booked_events(cell_value)
 
             # Count existing bookings in calendar (always check, even in dry-run)
-            cal_conflicts = check_calendar_conflicts(
-                booking["date"], booking["dj_initials_bracket"]
-            )
+            try:
+                cal_conflicts = check_calendar_conflicts(
+                    booking["date"], booking["dj_initials_bracket"]
+                )
+            except calendar_read.CalendarReadError as e:
+                msg = (
+                    f"Calendar check FAILED for {booking['date_display']}:\n\n{e}\n\n"
+                    f"Could not read the Gigs/Unavailable calendars, so conflicts "
+                    f"were NOT checked. The booking was NOT written. Verify the "
+                    f"calendar manually, then run the booking again."
+                )
+                print(f"  ERROR: {msg}")
+                self.log(f"HALTED: calendar check failed — {e}")
+                if not self.dry_run:
+                    show_warning_dialog(msg)
+                return False
             calendar_count = len(cal_conflicts)
 
             print(f"  Matrix shows: {matrix_count} booking(s) for {dj_short}")
@@ -1632,11 +1644,27 @@ class GigBookingManager:
                 print(f"  Checking calendar for {backup_initials_bracket}...")
 
                 # Check backup calendar conflicts (always check, even in dry-run)
-                backup_cal_conflicts = check_calendar_conflicts(
-                    booking["date"], backup_initials_bracket
-                )
+                try:
+                    backup_cal_conflicts = check_calendar_conflicts(
+                        booking["date"], backup_initials_bracket
+                    )
+                    backup_check_error = None
+                except calendar_read.CalendarReadError as e:
+                    backup_cal_conflicts = []
+                    backup_check_error = e
 
-                if backup_cal_conflicts:
+                if backup_check_error:
+                    msg = (
+                        f"Calendar check FAILED for backup {backup_initials_bracket} "
+                        f"on {booking['date_display']}:\n\n{backup_check_error}\n\n"
+                        f"Backup NOT assigned. Primary booking is intact."
+                    )
+                    print(f"  ⚠️  Backup calendar check failed: {backup_check_error}")
+                    self.log(f"Backup skipped: calendar check failed for {backup_dj}")
+                    if not self.dry_run:
+                        show_warning_dialog(msg)
+                    backup_dj = None
+                elif backup_cal_conflicts:
                     conflict_list = "\n".join(backup_cal_conflicts)
                     msg = (
                         f"Calendar conflict for {backup_initials_bracket} "

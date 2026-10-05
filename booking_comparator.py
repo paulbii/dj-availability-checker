@@ -6,7 +6,7 @@ Cross-checks up to three booking systems to find discrepancies:
 
   1. Gig Database    — pulled LIVE from bigfundj.com JSON endpoint
   2. Avail Matrix    — pulled LIVE from Google Sheets
-  3. Master Calendar — pulled LIVE via icalBuddy (macOS); Gigs + Wedding Faires
+  3. Master Calendar — pulled LIVE via CalDAV; Gigs + Wedding Faires
 
 Usage:
   python3 booking_comparator.py --year 2026
@@ -17,7 +17,7 @@ Usage:
 The script:
   - Fetches the gig database live from the JSON endpoint (falls back to text file)
   - Pulls the availability matrix directly from Google Sheets
-  - Pulls the master calendar directly via icalBuddy
+  - Pulls the master calendar directly via CalDAV (calendar_read.py)
   - Compares all three and reports discrepancies
   - Auto-saves report to "MM-DD-YYYY - Systems crosscheck.txt"
 """
@@ -26,12 +26,12 @@ import argparse
 import json
 import os
 import re
-import subprocess
+import calendar_read
 import sys
 import urllib.request
 import urllib.error
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 # Import shared DJ data and Google Sheets access from dj_core
 from dj_core import (
@@ -308,7 +308,7 @@ def fetch_availability_matrix(year):
 
 
 # =============================================================================
-# MASTER CALENDAR (live via icalBuddy)
+# MASTER CALENDAR (live via CalDAV)
 # =============================================================================
 
 # DJ initials bracket at the front of a calendar title: [PB], [WM/HK], [PB, WM].
@@ -327,127 +327,77 @@ def parse_dj_codes(title):
     return re.split(r'\s*[/,]\s*', match.group(1))
 
 
-def fetch_master_calendar(year):
+def parse_calendar_events(events, initials_to_name, year=None):
     """
-    Pull master calendar events directly via icalBuddy.
-    Queries the entire year of events from the Gigs and Wedding Faires
-    calendars. Wedding faires are rare but appear in the Gig DB, so they
-    must be included to avoid false "missing from calendar" mismatches.
-    Returns: (bookings, backups) where each is dict of { "M/D": ["DJ1", "DJ2", ...] }
+    Turn calendar events into bookings and backups.
+
+    events: list of (date, summary) from calendar_read.fetch_events.
+    initials_to_name: {"[PB]": "Paul", ...}
+    Returns: (bookings, backups), each { "M/D": [sorted DJ names] }.
+
+    Titles without a DJ bracket are ignored. "BACKUP" in the title means a
+    backup entry; "Hold to DJ" is RESERVED and skipped, like the matrix. An
+    unassigned code ([U], [UP]) is TBA; an unrecognised code shows as "?XX".
+    With `year`, events starting in another year (a 12/31 event overlapping
+    Jan 1) are dropped so they aren't keyed into this year's report.
     """
-    events = defaultdict(list)
+    bookings = defaultdict(list)
     backups = defaultdict(list)
 
-    # Check if icalBuddy is available
-    ical_buddy = "/opt/homebrew/bin/icalBuddy"
-    if not os.path.exists(ical_buddy):
-        print("  WARNING: icalBuddy not installed (brew install ical-buddy)")
-        print("  Skipping calendar comparison.")
-        return None, None
+    for event_date, summary in events:
+        if year is not None and event_date.year != int(year):
+            continue
+        dj_codes = parse_dj_codes(summary)
+        if not dj_codes:
+            continue
+        upper = summary.upper()
+        if 'HOLD TO DJ' in upper:
+            continue
+        target = backups if 'BACKUP' in upper else bookings
 
-    # Build reverse map: initials bracket → DJ name
+        date_key = f"{event_date.month}/{event_date.day}"
+        for code in dj_codes:
+            bracket_key = f"[{code}]"
+            if bracket_key in initials_to_name:
+                target[date_key].append(initials_to_name[bracket_key])
+            elif code.startswith('U'):
+                target[date_key].append('TBA')
+            else:
+                target[date_key].append(f"?{code}")
+
+    return ({k: sorted(v) for k, v in bookings.items()},
+            {k: sorted(v) for k, v in backups.items()})
+
+
+def fetch_master_calendar(year):
+    """
+    Pull the year's events from the Gigs and Wedding Faires calendars over
+    CalDAV. Wedding faires are rare but appear in the Gig DB, so they must be
+    included to avoid false "missing from calendar" mismatches.
+    Returns: (bookings, backups) where each is dict of { "M/D": ["DJ1", "DJ2", ...] },
+    or (None, None) if the calendar can't be read (the report then says
+    "Gig DB + Matrix" so a partial run is visible).
+    """
+    # Build reverse map: initials bracket -> DJ name
     # DJ_INITIALS: {"Henry": "HK", "Woody": "WM", ...}
-    initials_to_name = {}
-    for name, initials in DJ_INITIALS.items():
-        if name != "Unknown":
-            initials_to_name[f"[{initials}]"] = name
-
-    # Also handle unassigned: [U], [UP], etc.
-    # We'll catch anything with [U followed by optional letters]
-
-    # Query the entire year at once (Jan 1 to Dec 31)
-    start_date = f"{year}-01-01"
-    end_date = f"{year}-12-31"
+    initials_to_name = {f"[{initials}]": name
+                        for name, initials in DJ_INITIALS.items() if name != "Unknown"}
 
     print(f"  Querying calendar for {year}...")
     try:
-        result = subprocess.run(
-            [ical_buddy, "-ic", "Gigs,Wedding Faires",
-             "-eep", "notes,url,location,attendees",
-             "-b", "", "-nc", "-nrd",
-             "-df", "%m/%d",
-             "-iep", "title,datetime",
-             f"eventsFrom:{start_date}", f"to:{end_date}"],
-            capture_output=True, text=True, timeout=30,
-        )
-
-        if result.returncode != 0:
-            print(f"  WARNING: icalBuddy returned error: {result.stderr}")
-            return None, None
-
-        # icalBuddy output format (title and datetime on separate lines):
-        #   [PB] Christina and David
-        #       01/03 at 1:00 PM - 10:00 PM
-        #   [HK] Kristy's 50th Birthday Party
-        #       01/03 at 3:00 PM - 10:00 PM
-        # All-day events have just the date:
-        #   [SB] PAID BACKUP DJ
-        #       01/03
-
-        pending_djs = None  # DJ(s) from title line, waiting for date line
-        pending_is_backup = False
-        pending_is_hold = False  # "Hold to DJ" = RESERVED, skip like matrix
-
-        for line in result.stdout.split('\n'):
-            stripped = line.strip()
-            if not stripped:
-                continue
-
-            # Check if this is a title line with a DJ bracket code
-            # Handles single [PB], dual [WM/HK] or [PB, WM], and other formats
-            dj_codes = parse_dj_codes(stripped)
-            if dj_codes and not stripped[0].isdigit():
-                is_backup = 'BACKUP' in stripped.upper()
-                is_hold = 'HOLD TO DJ' in stripped.upper()
-
-                # Resolve each DJ code to a name
-                pending_djs = []
-                for code in dj_codes:
-                    bracket_key = f"[{code}]"
-                    if bracket_key in initials_to_name:
-                        pending_djs.append(initials_to_name[bracket_key])
-                    elif code.startswith('U'):
-                        pending_djs.append('TBA')
-                    else:
-                        pending_djs.append(f"?{code}")
-
-                pending_is_backup = is_backup
-                pending_is_hold = is_hold
-                continue
-
-            # Check if this is a date/time line (follows a title line)
-            if pending_djs:
-                date_match = re.search(r'(\d{1,2}/\d{1,2})', stripped)
-                if date_match and not pending_is_hold:
-                    raw_date = date_match.group(1)
-                    parts = raw_date.split('/')
-                    date_key = f"{int(parts[0])}/{int(parts[1])}"
-                    for dj in pending_djs:
-                        if pending_is_backup:
-                            backups[date_key].append(dj)
-                        else:
-                            events[date_key].append(dj)
-                pending_djs = None
-                pending_is_backup = False
-                pending_is_hold = False
-
-        # Sort DJs for each date
-        for date_key in events:
-            events[date_key] = sorted(events[date_key])
-        for date_key in backups:
-            backups[date_key] = sorted(backups[date_key])
-
-        booking_count = sum(len(v) for v in events.values())
-        backup_count = sum(len(v) for v in backups.values())
-        print(f"  Found {booking_count} events on {len(events)} dates, {backup_count} backups on {len(backups)} dates")
-        return events, backups
-
-    except FileNotFoundError:
-        print("  WARNING: icalBuddy not found")
+        events = calendar_read.fetch_events(
+            ["Gigs", "Wedding Faires"],
+            date(int(year), 1, 1), date(int(year), 12, 31))
+    except calendar_read.CalendarReadError as e:
+        print(f"  WARNING: calendar read failed: {e}")
+        print("  Skipping calendar comparison.")
         return None, None
-    except subprocess.TimeoutExpired:
-        print("  WARNING: Calendar query timed out")
-        return None, None
+
+    bookings, backups = parse_calendar_events(events, initials_to_name, year)
+    booking_count = sum(len(v) for v in bookings.values())
+    backup_count = sum(len(v) for v in backups.values())
+    print(f"  Found {booking_count} events on {len(bookings)} dates, {backup_count} backups on {len(backups)} dates")
+    return bookings, backups
 
 
 # =============================================================================
@@ -723,11 +673,11 @@ def main():
     print(f"\n[2/3] Fetching availability matrix from Google Sheets...")
     avail_matrix, matrix_backups = fetch_availability_matrix(args.year)
 
-    # 3. Fetch master calendar via icalBuddy
+    # 3. Fetch master calendar via CalDAV
     master_cal = None
     cal_backups = None
     if not args.no_calendar:
-        print(f"\n[3/3] Fetching master calendar via icalBuddy...")
+        print(f"\n[3/3] Fetching master calendar via CalDAV...")
         master_cal, cal_backups = fetch_master_calendar(args.year)
     else:
         print(f"\n[3/3] Skipping master calendar (--no-calendar)")

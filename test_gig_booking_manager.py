@@ -11,10 +11,11 @@ requiring Google Sheets or Calendar access.
 """
 
 import unittest
+from unittest import mock
 import json
 import os
 import tempfile
-from datetime import datetime
+from datetime import date, datetime
 
 from gig_booking_manager import (
     # Utility functions
@@ -49,7 +50,9 @@ from gig_booking_manager import (
     MockSheetsClient,
     GigBookingManager,
     COLUMN_MAPS,
+    check_calendar_conflicts,
 )
+from calendar_read import CalendarReadError
 from dj_core import check_dj_availability, KNOWN_CELL_VALUES
 
 
@@ -637,6 +640,12 @@ class TestSetupBookingWrite(unittest.TestCase):
     """gig_booking_manager handling of Setup-type events: write SETUP (not
     BOOKED) to the matrix, skip the backup assessment, label the calendar."""
 
+    def setUp(self):
+        # Never read the live calendar from tests (11/18/2026 has a real [WM] event).
+        patcher = mock.patch("gig_booking_manager.check_calendar_conflicts", return_value=[])
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_is_setup_booking(self):
         self.assertTrue(is_setup_booking({"event_type": "Setup"}))
         self.assertTrue(is_setup_booking({"event_type": "setup"}))
@@ -1011,6 +1020,13 @@ class TestMockSheetsClient(unittest.TestCase):
 class TestDryRunFlow(unittest.TestCase):
     """Test the full flow using dry-run mode (no external calls)."""
 
+    def setUp(self):
+        # The conflict check reads the live calendar over CalDAV even in dry-run.
+        # Stub it so these tests never touch the server and see an empty date.
+        patcher = mock.patch("gig_booking_manager.check_calendar_conflicts", return_value=[])
+        self.conflicts = patcher.start()
+        self.addCleanup(patcher.stop)
+
     def _write_json(self, data):
         fd, path = tempfile.mkstemp(suffix=".json")
         with os.fdopen(fd, "w") as f:
@@ -1122,6 +1138,83 @@ class TestDryRunFlow(unittest.TestCase):
             self.assertEqual(write["value"], "BOOKED x 2")
         finally:
             os.unlink(path)
+
+    def test_calendar_read_failure_halts_booking(self):
+        """A calendar that can't be read must never pass as 'no conflicts'."""
+        self.conflicts.side_effect = CalendarReadError("server down")
+        data = {
+            "event_date": "2026-11-18",
+            "client_name": "Test Calendar Down Client",
+            "assigned_dj": "Paul Burchfield",
+            "venue_name": "Test Venue",
+            "setup_time": "4:00",
+            "clear_time": "10:00",
+            "sound_type": "Standard Speakers",
+            "has_ceremony_sound": False,
+        }
+        path = self._write_json(data)
+        try:
+            manager = GigBookingManager(dry_run=True, test_mode=True)
+            success = manager.run(path)
+            self.assertFalse(success)
+            self.assertEqual(len(manager.sheets.writes), 0)
+        finally:
+            os.unlink(path)
+
+
+# =============================================================================
+# Calendar Conflict Check Tests
+# =============================================================================
+
+class TestCheckCalendarConflicts(unittest.TestCase):
+
+    def check(self, events, bracket="[PB]"):
+        with mock.patch("gig_booking_manager.calendar_read.fetch_events",
+                        return_value=events) as fetch:
+            result = check_calendar_conflicts(datetime(2026, 9, 24), bracket)
+        return result, fetch
+
+    def test_reads_gigs_and_unavailable_for_that_day(self):
+        _, fetch = self.check([])
+        names, start, end = fetch.call_args[0][:3]
+        self.assertEqual(names, ["Gigs", "Unavailable"])
+        self.assertEqual((start, end), (date(2026, 9, 24), date(2026, 9, 24)))
+
+    def test_finds_dj_event(self):
+        result, _ = self.check([(date(2026, 9, 24), "[PB] Nicole and Tommy")])
+        self.assertEqual(result, ["[PB] Nicole and Tommy"])
+
+    def test_ignores_other_djs_and_non_booking_entries(self):
+        result, _ = self.check([
+            (date(2026, 9, 24), "[HK] Starry Foundation SF"),
+            (date(2026, 9, 24), "[PB] BACKUP DJ"),
+            (date(2026, 9, 24), "[PB] DAD-DUTY"),
+            (date(2026, 9, 24), "[PB] Hold to DJ Smith"),
+        ])
+        self.assertEqual(result, [])
+
+    def test_finds_joint_events_in_either_bracket_format(self):
+        result, _ = self.check([
+            (date(2026, 9, 24), "[PB, WM] CASA of San Mateo County Fundraiser"),
+            (date(2026, 9, 24), "[WM/HK] Memorial Service"),
+        ], bracket="[WM]")
+        self.assertEqual(result, ["[PB, WM] CASA of San Mateo County Fundraiser",
+                                  "[WM/HK] Memorial Service"])
+
+    def test_no_partial_initials_match(self):
+        result, _ = self.check([(date(2026, 9, 24), "[PB/HK] Smith Wedding")], bracket="[P]")
+        self.assertEqual(result, [])
+
+    def test_ignores_events_starting_another_day(self):
+        """An event running past midnight from the day before is not this day's booking."""
+        result, _ = self.check([(date(2026, 9, 23), "[PB] Late Night Party")])
+        self.assertEqual(result, [])
+
+    def test_read_failure_raises_not_empty(self):
+        with mock.patch("gig_booking_manager.calendar_read.fetch_events",
+                        side_effect=CalendarReadError("server down")):
+            with self.assertRaises(CalendarReadError):
+                check_calendar_conflicts(datetime(2026, 9, 24), "[PB]")
 
 
 # =============================================================================

@@ -18,6 +18,7 @@ The script:
 """
 
 import argparse
+import calendar_read
 import html
 import json
 import os
@@ -279,7 +280,18 @@ class BackupAssigner:
 
         # Check calendar conflicts
         initials_bracket = f"[{get_dj_initials(backup_dj)}]"
-        conflicts = check_calendar_conflicts(date_obj, initials_bracket)
+        try:
+            conflicts = check_calendar_conflicts(date_obj, initials_bracket)
+        except calendar_read.CalendarReadError as e:
+            msg = (
+                f"Calendar check FAILED for {initials_bracket} "
+                f"on {date_display}:\n\n{e}\n\n"
+                f"Backup NOT assigned."
+            )
+            print(f"  ⚠️  Calendar check failed: {e}")
+            show_warning_dialog(msg)
+            self.stats["skipped"] += 1
+            return
 
         if conflicts:
             conflict_list = "\n".join(conflicts)
