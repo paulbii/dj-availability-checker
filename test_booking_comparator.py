@@ -98,5 +98,67 @@ class TestExplainNotDemand(unittest.TestCase):
         self.assertNotIn("ALL SYSTEMS IN SYNC", out)
 
 
+def _report_with_backups(gig_db, gig_secondary, matrix, cal, matrix_backups):
+    buf = io.StringIO()
+    compare_systems(gig_db, matrix, master_cal=cal, matrix_backups=matrix_backups,
+                    cal_backups=matrix_backups, gig_secondary=gig_secondary,
+                    output=buf)
+    return buf.getvalue()
+
+
+class TestHelperOnCalendar(unittest.TestCase):
+    """A DJ2 helper (setup/teardown) goes on the calendar title so the time is
+    blocked, but is not BOOKED in the matrix. Explained when the matrix holds
+    their day (BACKUP); still flagged when the matrix shows them free."""
+
+    def test_helper_blocked_as_backup_is_in_sync(self):
+        # 9/24/2026 CASA: Paul DJ1, Woody DJ2 helping, "[PB, WM]" on the
+        # calendar, Woody BACKUP in the matrix.
+        out = _report_with_backups(
+            gig_db={"9/24": ["Henry", "Paul"]},
+            gig_secondary={"9/24": ["Woody"]},
+            matrix={"9/24": ["Henry", "Paul"]},
+            cal={"9/24": ["Henry", "Paul", "Woody"]},
+            matrix_backups={"9/24": ["Woody"]},
+        )
+        self.assertIn("ALL SYSTEMS IN SYNC", out)
+
+    def test_helper_free_in_matrix_still_flags(self):
+        # Same shape, but the matrix shows Woody free that day: he could be
+        # booked elsewhere, so it must still surface.
+        out = _report_with_backups(
+            gig_db={"9/24": ["Henry", "Paul"]},
+            gig_secondary={"9/24": ["Woody"]},
+            matrix={"9/24": ["Henry", "Paul"]},
+            cal={"9/24": ["Henry", "Paul", "Woody"]},
+            matrix_backups={},
+        )
+        self.assertIn("DJ ASSIGNMENT MISMATCHES", out)
+
+    def test_backup_not_in_dj2_still_flags(self):
+        # Woody is backup but NOT the DJ2 on the gig db: a calendar title
+        # naming him is unexplained.
+        out = _report_with_backups(
+            gig_db={"9/24": ["Paul"]},
+            gig_secondary={},
+            matrix={"9/24": ["Paul"]},
+            cal={"9/24": ["Paul", "Woody"]},
+            matrix_backups={"9/24": ["Woody"]},
+        )
+        self.assertIn("DJ ASSIGNMENT MISMATCHES", out)
+
+    def test_other_mismatch_on_date_still_shows_helper_on_cal_line(self):
+        # The helper is explained, but the date has a real problem too; the
+        # Cal line must show what the calendar actually says.
+        out = _report_with_backups(
+            gig_db={"9/24": ["Henry", "Paul"]},
+            gig_secondary={"9/24": ["Woody"]},
+            matrix={"9/24": ["Paul"]},
+            cal={"9/24": ["Henry", "Paul", "Woody"]},
+            matrix_backups={"9/24": ["Woody"]},
+        )
+        self.assertIn("Cal:     Henry, Paul, Woody", out)
+
+
 if __name__ == "__main__":
     unittest.main()

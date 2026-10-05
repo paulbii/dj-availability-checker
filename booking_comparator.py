@@ -484,7 +484,15 @@ def compare_systems(gig_db, avail_matrix, master_cal=None,
         cal_djs = sorted(set(master_cal.get(date_key, []))) if has_calendar else None
 
         if has_calendar:
-            all_match = (gig_djs == matrix_djs == cal_djs)
+            # A DJ2 helper (setup/teardown) goes in the calendar title so the
+            # time is blocked, but isn't BOOKED in the matrix. Explained when
+            # the matrix holds their day as BACKUP; free in the matrix still
+            # flags. Compare without them, but report the calendar as it is.
+            held = set((matrix_backups or {}).get(date_key, []))
+            helpers = {dj for dj in gig_secondary.get(date_key, [])
+                       if dj in held and dj not in matrix_set}
+            cal_cmp = sorted(set(cal_djs) - helpers)
+            all_match = (gig_djs == matrix_djs == cal_cmp)
         else:
             all_match = (gig_djs == matrix_djs)
 
