@@ -78,4 +78,4 @@ Write these first, against fixture `(date, summary)` lists and fake VEVENTs:
 - The review found a bug that predates this change: `check_calendar_conflicts` matched on the substring `"[PB]"`, so joint events (`[PB, WM]`, `[WM/HK]`) never counted as conflicts, and a co-DJ could be assigned as backup. It now matches on `parse_dj_codes`, and only counts events that start that day.
 - The comparator drops events that start in another year.
 - Acceptance: (1) both years compare all 3 systems, run from VS Code. (2) Compared with 9/23, the backups are identical. 9/24 did not clear: the comma parse now shows Woody (who is in the Gig DB's DJ2/roadie slot), which is a labeling question. 11/21 Henry is new, a Gig DB-only booking. (3) A live `check_calendar_conflicts(9/24, "[PB]")` returns the CASA title. (4) All suites pass.
-- Still to confirm: one real Stream Deck / AppleScript run of `gig_booking_manager`, to make sure `.venv/bin/python` reads the `bigfun-caldav` Keychain item without an access prompt.
+- Confirmed 2026-10-05: a real Stream Deck run of `gig_booking_manager` read the `bigfun-caldav` Keychain item with no access prompt (Paul).
