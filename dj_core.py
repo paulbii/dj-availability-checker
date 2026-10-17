@@ -1140,8 +1140,24 @@ def dj_status(dj_name, value, date_obj, year, gig_booking=None, nearby_bookings=
     if clean and low not in KNOWN_CELL_VALUES:
         return DJStatus(f"{clean} ⚠️  unknown status — treating as unavailable", "warn", False, False)
 
-    # 3. Everything else goes through the yes/no rule. (Task 2 fills this in.)
-    raise NotImplementedError
+    # 3. Everything else goes through the yes/no rule.
+    can_book, can_backup = check_dj_availability(dj_name, clean, date_obj, is_bold, year, warn=False)
+    head = f"{value} - " if value else ""
+
+    if can_book:
+        nearby = f" (booked: {', '.join(nearby_bookings)})" if nearby_bookings else ""
+        return DJStatus(f"{head}available{nearby}", "green", True, can_backup)
+
+    if can_backup:
+        reason = ""
+        if low == "out" and is_weekend(date_obj):
+            reason = " (weekend)"
+        elif not clean and not is_weekend(date_obj):
+            reason = " (weekday)"
+        return DJStatus(f"{head}can backup{reason}", "blue", False, True)
+
+    # Dead-end: OUT, MAXED, or a blank cell the rule says means out.
+    return DJStatus(value if value else f"not available ({year})", "dim", False, False)
 
 
 def analyze_availability(selected_data, date_obj, year=None):

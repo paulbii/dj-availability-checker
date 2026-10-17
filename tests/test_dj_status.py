@@ -96,5 +96,61 @@ class TestHardCellStates(unittest.TestCase):
         self.assertEqual((s.can_book, s.can_backup), (False, False))
 
 
+class TestComputedStates(unittest.TestCase):
+
+    def test_blank_available_has_no_value_prefix(self):
+        s = dj_status("Henry", "", SAT, "2027")
+        self.assertEqual(s, DJStatus("available", "green", True, True, ""))
+
+    def test_ok_available_keeps_value(self):
+        s = dj_status("Stephanie", "OK", SAT, "2027")
+        self.assertEqual((s.text, s.kind, s.can_book), ("OK - available", "green", True))
+
+    def test_nearby_bookings_are_appended(self):
+        s = dj_status("Paul", "", SAT, "2027", nearby_bookings=["6/25 Nestldown", "6/27 Kohl"])
+        self.assertEqual(s.text, "available (booked: 6/25 Nestldown, 6/27 Kohl)")
+
+    def test_henry_weekday_blank_is_backup_with_reason(self):
+        s = dj_status("Henry", "", WED, "2027")
+        self.assertEqual(s, DJStatus("can backup (weekday)", "blue", False, True, ""))
+
+    def test_woody_plain_out_on_weekend_is_backup_with_reason(self):
+        s = dj_status("Woody", "OUT", SAT, "2027")
+        self.assertEqual(s, DJStatus("OUT - can backup (weekend)", "blue", False, True, ""))
+
+    def test_woody_bold_out_on_weekend_is_dead_end(self):
+        s = dj_status("Woody", "OUT (BOLD)", SAT, "2027")
+        self.assertEqual(s, DJStatus("OUT (BOLD)", "dim", False, False, ""))
+
+    def test_paul_out_is_dead_end(self):
+        self.assertEqual(dj_status("Paul", "OUT", SAT, "2027"),
+                         DJStatus("OUT", "dim", False, False, ""))
+
+    def test_stefano_maxed_is_dead_end(self):
+        self.assertEqual(dj_status("Stefano", "MAXED", SAT, "2027").kind, "dim")
+
+    def test_stephanie_blank_2027_is_not_available(self):
+        s = dj_status("Stephanie", "", SAT, "2027")
+        self.assertEqual(s, DJStatus("not available (2027)", "dim", False, False, ""))
+
+    def test_stephanie_blank_2026_is_not_available(self):
+        s = dj_status("Stephanie", "", date(2026, 10, 24), "2026")
+        self.assertEqual(s.text, "not available (2026)")
+
+    def test_stephanie_blank_weekday_2027_is_not_available(self):
+        self.assertEqual(dj_status("Stephanie", "", WED, "2027").text, "not available (2027)")
+
+    def test_stephanie_out_2027_is_dead_end(self):
+        self.assertEqual(dj_status("Stephanie", "OUT", SAT, "2027"),
+                         DJStatus("OUT", "dim", False, False, ""))
+
+    def test_felipe_ok_2027_is_available(self):
+        self.assertEqual(dj_status("Felipe", "OK", SAT, "2027").can_book, True)
+
+    def test_felipe_dad_2027_is_backup(self):
+        s = dj_status("Felipe", "DAD", SAT, "2027")
+        self.assertEqual(s, DJStatus("DAD - can backup", "blue", False, True, ""))
+
+
 if __name__ == "__main__":
     unittest.main()
