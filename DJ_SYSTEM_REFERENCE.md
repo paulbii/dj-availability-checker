@@ -255,6 +255,14 @@ Each DJ has unique rules for determining availability based on cell value, bold 
 
 Auto-deploys from the main branch on GitHub. Secrets are configured in the Streamlit Cloud dashboard under the app's settings. The keep-alive workflow (`.github/workflows/keep-alive.yml`) pings the app every 5 minutes via GitHub Actions cron. UptimeRobot also monitors the URL as a more reliable backup.
 
+### Shipping an availability-rule change
+
+Rules live in `dj_core.py` only (`check_dj_availability` for yes/no, `dj_status` for wording and color, `dj_range_bucket` for the per-DJ range query). The three front ends paint `DJStatus` and `tests/test_no_dj_rules_in_front_ends.py` fails if one of them branches on a DJ name again.
+
+The desktop apps are frozen PyInstaller bundles and do not see source edits. Each carries `Contents/Resources/source-stamp.txt`, a hash of `dj_core.py` + `check_dj_gui.py` (`scripts/source_stamp.sh`). The pre-commit hook (`scripts/check_frozen_apps.sh`) refuses a commit that stages either file unless the installed apps already carry that hash.
+
+So the one path is: edit, `git add` by name, `./release.sh "message"`. It runs the tests, rebuilds and installs both apps, commits, and pushes (Streamlit Cloud redeploys from `main`). On a machine without the apps: `SKIP_FROZEN_CHECK=1 git commit`.
+
 ### Stream Deck Buttons
 
 | Button | Command (Run Shell Command) |
