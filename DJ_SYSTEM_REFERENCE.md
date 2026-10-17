@@ -238,7 +238,7 @@ Each DJ has unique rules for determining availability based on cell value, bold 
 | **Woody** | Blank = yes, Weekend OUT (plain) = no | Blank = yes, Weekend OUT (plain) = yes, Weekend OUT (bold) = no, Weekday OUT = no |
 | **Stefano** | Max 2/month. Blank = MAYBE (not counted) | Blank = MAYBE |
 | **Felipe** | OK = yes, Blank/DAD/OK TO BACKUP = no | Blank/OK/DAD/OK TO BACKUP = yes |
-| **Stephanie** | 2026: explicit only. 2027+: weekend blank = yes | Per year rules |
+| **Stephanie** | 2026 and 2027: explicit only (OK = yes, blank = no, any day). Paul 2026-10-17: out for 2027 except dates she has said yes to. | Same: OK = yes, blank = no |
 
 ---
 

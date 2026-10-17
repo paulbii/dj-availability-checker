@@ -68,15 +68,12 @@ def format_dj_status_for_display(dj_name, value, date_obj, year, gig_booking=Non
         venue = gig_booking.get('venue', '')
         return html_color("red", f"BOOKED ({venue})") + _warn_suffix()
 
-    # Special case for Stephanie 2026 - only available when explicitly assigned
-    if dj_name == "Stephanie" and year == "2026":
+    # Special case for Stephanie 2026 and 2027 - only available when explicitly
+    # marked OK. Blank = not available, any day. 2027 added 2026-10-17: she is
+    # out except on dates she has specifically said yes to.
+    if dj_name == "Stephanie" and year in ("2026", "2027"):
         if not value or value.strip() == "":
-            return html_color("dim", "not available (2026)")
-
-    # Special case for Stephanie on weekdays (2027+)
-    if dj_name == "Stephanie" and int(year) >= 2027 and not is_weekend(date_obj):
-        if not value or value.strip() == "":
-            return html_color("dim", "not available (weekday)")
+            return html_color("dim", f"not available ({year})")
 
     # Special case for Stefano with blank cell
     if dj_name == "Stefano" and (not value or value.strip() == ""):

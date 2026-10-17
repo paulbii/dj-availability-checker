@@ -216,8 +216,12 @@ def check_availability(sheet_name, month_day_to_check, service, spreadsheet, spr
                     response.append(f"{Fore.RED}{label}: {value}{Style.RESET_ALL}")
                 elif "backup" in value_lower:
                     response.append(f"{Fore.BLUE}{label}: {value}{Style.RESET_ALL}")
+                elif not value or value.strip() == "":
+                    # Blank Stephanie = not available (2026 rule; extended to 2027 on
+                    # 2026-10-17: out except dates she has said yes to, marked OK)
+                    response.append(f"{label}: not available ({sheet_name})")
                 elif year_int >= 2027:
-                    # 2027+: Stephanie is a regular weekend DJ, full availability check
+                    # 2027+: non-blank cell gets the full availability check
                     is_bold = "(BOLD)" in value if value else False
                     clean_val = value.replace(" (BOLD)", "") if value else ""
                     can_book, can_backup = check_dj_availability(label, clean_val, date_obj, is_bold, sheet_name, warn=False)
@@ -228,9 +232,6 @@ def check_availability(sheet_name, month_day_to_check, service, spreadsheet, spr
                     
                     formatted_line = format_dj_status(label, value, date_obj, can_book, can_backup, sheet_name, nearby_bookings, steph_booking)
                     response.append(formatted_line)
-                elif not value or value.strip() == "":
-                    # Pre-2027: blank Stephanie = not available
-                    response.append(f"{label}: not available ({sheet_name})")
                 elif clean_value and clean_lower not in KNOWN_CELL_VALUES:
                     response.append(f"{Fore.YELLOW}{label}: {clean_value} ⚠️  unknown status — treating as unavailable{Style.RESET_ALL}")
                 else:

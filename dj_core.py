@@ -1018,18 +1018,13 @@ def check_dj_availability(dj_name, value, date_obj=None, is_bold=False, year=Non
         if value_lower == "out":
             return False, False  # Normal OUT rules apply
     
-    # Special case for Stephanie 2026 - only available when explicitly assigned
-    if dj_name == "Stephanie" and year == "2026":
-        if not value:  # Blank cell in 2026
-            return False, False  # NOT available (only works when explicitly assigned)
+    # Special case for Stephanie 2026 and 2027 - only available when explicitly marked
+    # (OK in the cell). Blank = NOT available, any day of the week. 2027 added
+    # 2026-10-17: she is out except on dates she has specifically said yes to.
+    if dj_name == "Stephanie" and year in ("2026", "2027"):
+        if not value:
+            return False, False
         # For non-blank values, continue to normal processing below
-    
-    # Special case for Stephanie on weekdays (2027+)
-    if dj_name == "Stephanie" and year == "2027" and not is_weekend_day:
-        if not value:  # Blank cell on weekday
-            return False, False  # NOT available on weekdays
-        if value_lower == "out":
-            return False, False  # Normal OUT rules apply
     
     if value_lower == "booked" or value_lower == "backup" or value_lower == "wedfaire" or value_lower == "setup":
         return False, False

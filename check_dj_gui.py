@@ -836,6 +836,10 @@ class Api:
                         lines.append({"text": f"{label}: {value}", "cls": "red"})
                     elif "backup" in vl:
                         lines.append({"text": f"{label}: {value}", "cls": "blue"})
+                    elif not value or value.strip() == "":
+                        # Blank Stephanie = not available (2026 rule; extended to 2027 on
+                        # 2026-10-17: out except dates she has said yes to, marked OK)
+                        lines.append({"text": f"{label}: not available ({self.sheet_name})", "cls": "dim"})
                     elif year_int >= 2027:
                         is_bold = "(BOLD)" in value if value else False
                         cv = value.replace(" (BOLD)", "") if value else ""
@@ -844,8 +848,6 @@ class Api:
                         if can_book and not steph_booking:
                             nearby = get_nearby_bookings_for_dj(label, date_obj, self.sheet_name, self.service, self.spreadsheet, self.spreadsheet_id)
                         lines.append(self._format_dj_line(label, value, date_obj, can_book, can_backup, nearby, steph_booking))
-                    elif not value or value.strip() == "":
-                        lines.append({"text": f"{label}: not available ({self.sheet_name})", "cls": "dim"})
                     elif clean_value and clean_lower not in KNOWN_CELL_VALUES:
                         lines.append({"text": f"{label}: {clean_value} ⚠️  unknown status — treating as unavailable", "cls": "warn"})
                     else:
