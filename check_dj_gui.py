@@ -19,17 +19,15 @@ from dj_core import (
     get_venue_inquiries_for_date,
     get_full_inquiries_for_date,
     get_nearby_bookings_for_dj,
-    check_dj_availability,
-    is_weekend,
     get_cache_info,
     clear_gig_cache,
     get_fully_booked_dates,
     get_bulk_availability_data,
     auto_clear_stale_cache,
-    KNOWN_CELL_VALUES,
     get_gig_database_bookings,
-    setup_status_text,
     get_venue_cautions,
+    dj_status,
+    dj_range_bucket,
 )
 
 
@@ -789,7 +787,6 @@ class Api:
 
             venue_info = get_venue_inquiries_for_date(selected_data['Date'], self.client, year=int(self.sheet_name))
 
-            year_int = int(self.sheet_name)
             lines = []
             lines.append({"text": f"Year: {self.sheet_name}", "cls": "heading"})
             lines.append({"text": f"Date: {selected_data['Date']}", "cls": "heading"})
@@ -815,54 +812,13 @@ class Api:
                     else:
                         lines.append({"text": f"{label}: {value}", "cls": ""})
 
-                elif label == "Stephanie":
-                    steph_booking = assigned_bookings.get("Stephanie")
-                    clean_value = value.replace(" (BOLD)", "").strip() if value else ""
-                    clean_lower = clean_value.lower()
-                    vl = str(value).lower()
-
-                    if steph_booking:
-                        venue = steph_booking.get('venue', '')
-                        t = f"{label}: BOOKED ({venue})"
-                        if clean_lower != "booked" and clean_lower != "wedfaire" and clean_lower != "setup":
-                            if clean_value:
-                                t += f'  ⚠️  matrix shows "{clean_value}"'
-                            else:
-                                t += "  ⚠️  matrix is blank"
-                        lines.append({"text": t, "cls": "red"})
-                    elif "booked" in vl or "aag" in vl:
-                        lines.append({"text": f"{label}: {value}", "cls": "red"})
-                    elif "reserved" in vl:
-                        lines.append({"text": f"{label}: {value}", "cls": "red"})
-                    elif "backup" in vl:
-                        lines.append({"text": f"{label}: {value}", "cls": "blue"})
-                    elif not value or value.strip() == "":
-                        # Blank Stephanie = not available (2026 rule; extended to 2027 on
-                        # 2026-10-17: out except dates she has said yes to, marked OK)
-                        lines.append({"text": f"{label}: not available ({self.sheet_name})", "cls": "dim"})
-                    elif year_int >= 2027:
-                        is_bold = "(BOLD)" in value if value else False
-                        cv = value.replace(" (BOLD)", "") if value else ""
-                        can_book, can_backup = check_dj_availability(label, cv, date_obj, is_bold, self.sheet_name, warn=False)
-                        nearby = []
-                        if can_book and not steph_booking:
-                            nearby = get_nearby_bookings_for_dj(label, date_obj, self.sheet_name, self.service, self.spreadsheet, self.spreadsheet_id)
-                        lines.append(self._format_dj_line(label, value, date_obj, can_book, can_backup, nearby, steph_booking))
-                    elif clean_value and clean_lower not in KNOWN_CELL_VALUES:
-                        lines.append({"text": f"{label}: {clean_value} ⚠️  unknown status — treating as unavailable", "cls": "warn"})
-                    else:
-                        lines.append({"text": f"{label}: {value}", "cls": ""})
-
                 else:
-                    # Standard DJ
-                    dj_gig_booking = assigned_bookings.get(label)
-                    is_bold = "(BOLD)" in value if value else False
-                    clean_value = value.replace(" (BOLD)", "") if value else ""
-                    can_book, can_backup = check_dj_availability(label, clean_value, date_obj, is_bold, self.sheet_name, warn=False)
-                    nearby = []
-                    if can_book and not dj_gig_booking:
+                    gig = assigned_bookings.get(label)
+                    status = dj_status(label, value, date_obj, self.sheet_name, gig)
+                    if status.can_book and not gig:
                         nearby = get_nearby_bookings_for_dj(label, date_obj, self.sheet_name, self.service, self.spreadsheet, self.spreadsheet_id)
-                    lines.append(self._format_dj_line(label, value, date_obj, can_book, can_backup, nearby, dj_gig_booking))
+                        status = dj_status(label, value, date_obj, self.sheet_name, gig, nearby)
+                    lines.append(self._render_dj_line(label, status))
 
             # Summary
             lines.append({"text": "", "cls": "divider"})
@@ -910,66 +866,13 @@ class Api:
         except Exception as e:
             return [{"text": f"Error: {str(e)}", "cls": "red"}]
 
-    def _format_dj_line(self, dj_name, value, date_obj, is_bookable, is_backup, nearby_bookings=None, gig_booking=None):
-        """Format a DJ status as a classified line dict."""
-        clean_value = value.replace(" (BOLD)", "").strip() if value else ""
-        clean_lower = clean_value.lower()
-
-        if gig_booking:
-            setup_text = setup_status_text(gig_booking)
-            if setup_text:
-                # Setup family: primary committed (amber); helper stands out
-                # (violet) since they could be pulled for a paying event.
-                cls = "violet" if gig_booking.get('role') == 'helper' else "amber"
-                t = f"{dj_name}: {setup_text}"
-                if clean_lower != "setup":
-                    if clean_value:
-                        t += f'  ⚠️  matrix shows "{clean_value}"'
-                    else:
-                        t += "  ⚠️  matrix is blank"
-                return {"text": t, "cls": cls}
-            venue = gig_booking.get('venue', '')
-            t = f"{dj_name}: BOOKED ({venue})"
-            if clean_lower != "booked" and clean_lower != "wedfaire" and clean_lower != "setup":
-                if clean_value:
-                    t += f'  ⚠️  matrix shows "{clean_value}"'
-                else:
-                    t += "  ⚠️  matrix is blank"
-            return {"text": t, "cls": "red"}
-
-        if dj_name == "Stefano" and (not value or value.strip() == ""):
-            return {"text": f"{dj_name}: [MAYBE]", "cls": "yellow"}
-
-        value_lower = value.lower() if value else ""
-        if value and "booked" in value_lower:
-            return {"text": f"{dj_name}: {value}", "cls": "red"}
-        if value and value_lower == "stanford":
-            return {"text": f"{dj_name}: STANFORD", "cls": "red"}
-        if value and "reserved" in value_lower:
-            return {"text": f"{dj_name}: RESERVED", "cls": "red"}
-        if value and "backup" in value_lower:
-            return {"text": f"{dj_name}: {value}", "cls": "blue"}
-
-        if dj_name == "Felipe" and self.year in ["2026", "2027"] and (not value or value.strip() == ""):
-            return {"text": f"{dj_name}: [BLANK] - can backup", "cls": "blue"}
-
-        if value and value_lower == "last":
-            return {"text": f"{dj_name}: {value} - available (low priority)", "cls": "green"}
-
-        if clean_value and clean_lower not in KNOWN_CELL_VALUES:
-            return {"text": f"{dj_name}: {clean_value} ⚠️  unknown status — treating as unavailable", "cls": "warn"}
-
-        nearby_text = ""
-        if nearby_bookings and len(nearby_bookings) > 0:
-            nearby_text = f" (booked: {', '.join(nearby_bookings)})"
-
-        if is_bookable:
-            return {"text": f"{dj_name}: {value} - available{nearby_text}", "cls": "green"}
-        if is_backup:
-            return {"text": f"{dj_name}: {value} - can backup", "cls": "blue"}
-
-        # Dead-end states (OUT, MAXED, etc. with nothing actionable) recede.
-        return {"text": f"{dj_name}: {value}", "cls": "dim"}
+    @staticmethod
+    def _render_dj_line(dj_name, status):
+        """Paint a dj_core.DJStatus as a classified line dict. No rules here."""
+        text = f"{dj_name}: {status.text}"
+        if status.warning:
+            text += f"  ⚠️  {status.warning}"
+        return {"text": text, "cls": status.kind}
 
     def check_date_range(self, start_str, end_str, day_filter, min_spots):
         """Query date range - mirrors query_date_range()."""
@@ -1066,22 +969,15 @@ class Api:
                     continue
                 value = date_info['selected_data'][dj_name]
                 is_bold = date_info['bold_status'].get(dj_name, False)
-                clean_value = str(value).replace(" (BOLD)", "") if value else ""
-                vl = clean_value.lower()
-
-                if "booked" in vl or vl == "stanford" or vl == "reserved" or vl == "wedfaire" or vl == "setup":
+                bucket = dj_range_bucket(dj_name, value, date_info['date_obj'], self.sheet_name, is_bold)
+                if bucket == "booked":
                     booked_date_infos.append(date_info)
-                elif "backup" in vl:
+                elif bucket == "backup":
                     backup_dates.append(date_info['date'])
-                else:
-                    if dj_name == "Stefano" and (not clean_value or clean_value == ""):
-                        available_dates.append(f"{date_info['date']} [MAYBE]")
-                    else:
-                        can_book, can_backup = check_dj_availability(
-                            dj_name, clean_value, date_info['date_obj'], is_bold, self.sheet_name, warn=False
-                        )
-                        if can_book:
-                            available_dates.append(date_info['date'])
+                elif bucket == "maybe":
+                    available_dates.append(f"{date_info['date']} [MAYBE]")
+                elif bucket == "available":
+                    available_dates.append(date_info['date'])
 
             # Look up venues for booked dates
             for date_info in booked_date_infos:
