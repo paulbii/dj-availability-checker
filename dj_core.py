@@ -12,6 +12,7 @@ import time
 from googleapiclient.discovery import build
 import html
 import requests
+from dataclasses import dataclass
 from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -1073,6 +1074,74 @@ def check_dj_availability(dj_name, value, date_obj=None, is_bold=False, year=Non
         return True, True
         
     return False, False
+
+
+@dataclass(frozen=True)
+class DJStatus:
+    """One DJ's display status for one date. Front ends paint this and
+    nothing else: `kind` is a PALETTE name ("warn" maps to yellow/orange),
+    `text` has no DJ-name prefix, `warning` is a matrix-mismatch note
+    shown in yellow after the text when non-empty."""
+    text: str
+    kind: str
+    can_book: bool
+    can_backup: bool
+    warning: str = ""
+
+
+def _matrix_mismatch(clean_value):
+    return f'matrix shows "{clean_value}"' if clean_value else "matrix is blank"
+
+
+def dj_status(dj_name, value, date_obj, year, gig_booking=None, nearby_bookings=None):
+    """Turn a Matrix cell (plus the Gig DB booking, if any) into a DJStatus.
+
+    This is the single home of the display rules. The yes/no rule itself is
+    check_dj_availability(); this wraps it and adds the wording and color.
+    Rules that name a DJ belong here or in check_dj_availability, never in
+    a front end (tests/test_no_dj_rules_in_front_ends.py enforces that).
+    """
+    value = str(value) if value else ""
+    year = str(year)
+    is_bold = "(BOLD)" in value
+    clean = value.replace(" (BOLD)", "").strip()
+    low = clean.lower()
+
+    # 1. A Gig DB commitment wins over whatever the cell says.
+    if gig_booking:
+        setup_text = setup_status_text(gig_booking)
+        if setup_text:
+            kind = "violet" if gig_booking.get("role") == "helper" else "amber"
+            warning = "" if low == "setup" else _matrix_mismatch(clean)
+            return DJStatus(setup_text, kind, False, False, warning)
+        venue = gig_booking.get("venue", "")
+        warning = "" if low in ("booked", "wedfaire", "setup") else _matrix_mismatch(clean)
+        return DJStatus(f"BOOKED ({venue})", "red", False, False, warning)
+
+    # 2. Cell states that settle the answer on their own.
+    if dj_name == "Stefano" and not clean:
+        return DJStatus("[MAYBE]", "yellow", False, False)
+    if "booked" in low or low == "aag":
+        return DJStatus(value, "red", False, False)
+    if low == "stanford":
+        return DJStatus("STANFORD", "red", False, False)
+    if "reserved" in low:
+        return DJStatus("RESERVED", "red", False, False)
+    if low == "wedfaire":
+        return DJStatus("WEDFAIRE", "red", False, False)
+    if low == "setup":
+        return DJStatus("SETUP", "amber", False, False)
+    if "backup" in low:
+        return DJStatus(value, "blue", False, True)
+    if dj_name == "Felipe" and year in ("2026", "2027") and not clean:
+        return DJStatus("[BLANK] - can backup", "blue", False, True)
+    if low == "last":
+        return DJStatus(f"{value} - available (low priority)", "green", True, True)
+    if clean and low not in KNOWN_CELL_VALUES:
+        return DJStatus(f"{clean} ⚠️  unknown status — treating as unavailable", "warn", False, False)
+
+    # 3. Everything else goes through the yes/no rule. (Task 2 fills this in.)
+    raise NotImplementedError
 
 
 def analyze_availability(selected_data, date_obj, year=None):
