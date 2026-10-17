@@ -9,7 +9,7 @@ import unittest
 from datetime import date
 
 import dj_core
-from dj_core import dj_status, DJStatus
+from dj_core import dj_status, dj_range_bucket, DJStatus
 
 
 SAT = date(2027, 6, 26)
@@ -150,6 +150,42 @@ class TestComputedStates(unittest.TestCase):
     def test_felipe_dad_2027_is_backup(self):
         s = dj_status("Felipe", "DAD", SAT, "2027")
         self.assertEqual(s, DJStatus("DAD - can backup", "blue", False, True, ""))
+
+
+class TestRangeBucket(unittest.TestCase):
+
+    def test_booked_cell(self):
+        self.assertEqual(dj_range_bucket("Paul", "BOOKED", SAT, "2027"), "booked")
+
+    def test_setup_cell_is_booked(self):
+        self.assertEqual(dj_range_bucket("Paul", "SETUP", SAT, "2027"), "booked")
+
+    def test_aag_cell_is_booked(self):
+        self.assertEqual(dj_range_bucket("Stephanie", "AAG", SAT, "2027"), "booked")
+
+    def test_backup_cell(self):
+        self.assertEqual(dj_range_bucket("Woody", "BACKUP", SAT, "2027"), "backup")
+
+    def test_ok_to_backup_cell_is_backup(self):
+        self.assertEqual(dj_range_bucket("Felipe", "OK TO BACKUP", SAT, "2027"), "backup")
+
+    def test_stefano_blank_is_maybe(self):
+        self.assertEqual(dj_range_bucket("Stefano", "", SAT, "2027"), "maybe")
+
+    def test_blank_available(self):
+        self.assertEqual(dj_range_bucket("Henry", "", SAT, "2027"), "available")
+
+    def test_felipe_blank_is_not_listed(self):
+        self.assertIsNone(dj_range_bucket("Felipe", "", SAT, "2027"))
+
+    def test_henry_weekday_blank_is_not_listed(self):
+        self.assertIsNone(dj_range_bucket("Henry", "", WED, "2027"))
+
+    def test_woody_bold_out_is_not_listed(self):
+        self.assertIsNone(dj_range_bucket("Woody", "OUT", SAT, "2027", is_bold=True))
+
+    def test_stephanie_blank_2027_is_not_listed(self):
+        self.assertIsNone(dj_range_bucket("Stephanie", "", SAT, "2027"))
 
 
 if __name__ == "__main__":

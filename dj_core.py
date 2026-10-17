@@ -1160,6 +1160,25 @@ def dj_status(dj_name, value, date_obj, year, gig_booking=None, nearby_bookings=
     return DJStatus(value if value else f"not available ({year})", "dim", False, False)
 
 
+def dj_range_bucket(dj_name, value, date_obj, year, is_bold=False):
+    """Which list a date goes in for the "DJ availability in range" query:
+    "booked", "backup", "maybe", "available", or None (not listed).
+    Bulk sheet data carries bold separately, so it is passed in."""
+    value = str(value) if value else ""
+    if is_bold and "(BOLD)" not in value:
+        value = f"{value} (BOLD)"
+    status = dj_status(dj_name, value, date_obj, year)
+    if status.text == "[MAYBE]":
+        return "maybe"
+    if status.kind in ("red", "amber"):
+        return "booked"
+    if "backup" in value.lower():
+        return "backup"
+    if status.can_book:
+        return "available"
+    return None
+
+
 def analyze_availability(selected_data, date_obj, year=None):
     """Analyze the availability status of all DJs"""
     booked_count = 0
