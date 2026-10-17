@@ -2,9 +2,9 @@
 # Build self-contained .app bundles for the DJ Availability GUI apps.
 # Output: release/DJ Availability <year>.app
 #
-# Re-run this (then the install step in docs/plans/2026-07-25-freeze-gui-apps-pyinstaller.md)
-# whenever check_dj_gui.py or dj_core.py changes — the frozen apps do NOT
-# pick up source edits on their own.
+# Normal path: ./release.sh (tests, build, install, commit, push). Run this
+# alone only to inspect a build. The frozen apps do NOT pick up source edits;
+# the pre-commit hook refuses rule changes until they are rebuilt and installed.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -18,6 +18,9 @@ for YEAR in 2026 2027; do
     "check_${YEAR}_gui.py"
 
   APP="dist/DJ Availability $YEAR.app"
+  # Stamp the frozen sources so scripts/check_frozen_apps.sh can tell a
+  # stale app from a current one. Must land before codesign.
+  scripts/source_stamp.sh > "$APP/Contents/Resources/source-stamp.txt"
   # app_icon.icns carries a com.apple.provenance xattr that macOS re-pins;
   # it breaks PyInstaller's built-in ad-hoc signing ("detritus not allowed").
   # Strip xattrs and re-sign, then verify. Retry loop: this repo lives under
