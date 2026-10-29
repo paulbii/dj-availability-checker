@@ -142,6 +142,31 @@ test("unassigned DJ stays 'Unassigned'", b["assigned_dj"] == "Unassigned", f"got
 
 
 # =========================================================================
+print("\n── parse_booking_json: Ⓟ preference tag stripped ──")
+# =========================================================================
+
+path = make_temp_json({
+    "FMeventDate": "2027-05-23",
+    "FMclient": "ⓅHK/PB-Jane Smith and Jim Williams",
+    "FMvenue": "Mountain Terrace",
+    "FMDJ1": "Henry Kim",
+})
+b = parse_booking_json(path)
+os.unlink(path)
+test("FM tag stripped", b["client_name"] == "Jane Smith and Jim Williams", f"got {b['client_name']}")
+
+path = make_temp_json({
+    "event_date": "2027-05-23",
+    "client_name": "ⓅHK-Jane Smith and Jim Williams",
+    "venue_name": "Mountain Terrace",
+    "assigned_dj": "Henry",
+})
+b = parse_booking_json(path)
+os.unlink(path)
+test("clean tag stripped", b["client_name"] == "Jane Smith and Jim Williams", f"got {b['client_name']}")
+
+
+# =========================================================================
 print("\n── calculate_consult_month ──")
 # =========================================================================
 

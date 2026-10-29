@@ -21,6 +21,7 @@ import os
 import sys
 from datetime import datetime
 
+from dj_core import strip_preference_tag
 from nurture_config import (
     DEFAULT_CREDENTIALS_PATH,
     SHORT_BOOKER_MONTHS,
@@ -50,7 +51,7 @@ def parse_booking_for_nurture(booking_path, email_args=None):
     # Detect format
     if 'FMclient' in data or 'FMeventDate' in data:
         # FM format
-        couple_name = data.get('FMclient', '').strip()
+        couple_name = strip_preference_tag(data.get('FMclient', '').strip())
         venue = data.get('FMvenue', '').strip()
         event_date_str = data.get('FMeventDate', '').strip()
         dj_name = data.get('FMDJ1', '').strip()
@@ -59,7 +60,7 @@ def parse_booking_for_nurture(booking_path, email_args=None):
         event_type = data.get('FMeventType', '').strip()
     else:
         # Clean format
-        couple_name = data.get('client_name', data.get('client', '')).strip()
+        couple_name = strip_preference_tag(data.get('client_name', data.get('client', '')).strip())
         venue = data.get('venue_name', data.get('venue', '')).strip()
         event_date_str = data.get('event_date', '').strip()
         dj_name = data.get('assigned_dj', data.get('dj', '')).strip()

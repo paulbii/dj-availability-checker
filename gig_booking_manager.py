@@ -56,6 +56,7 @@ from dj_core import (
     is_weekend,
     date_to_sheet_format,
     extract_client_first_names,
+    strip_preference_tag,
     parse_tba_value,
     is_paid_backup,
     # Time calculations
@@ -310,7 +311,7 @@ def parse_fm_format(raw):
         dj_initials = get_dj_initials(dj_short)
 
     # Client name
-    client_full = raw.get("FMclient", "Unknown Client")
+    client_full = strip_preference_tag(raw.get("FMclient", "Unknown Client"))
     client_display = extract_client_first_names(client_full)
 
     # Venue
@@ -389,7 +390,7 @@ def parse_clean_format(raw):
     else:
         dj_initials = get_dj_initials(dj_short)
 
-    client_full = raw.get("client_name", "Unknown Client")
+    client_full = strip_preference_tag(raw.get("client_name", "Unknown Client"))
     client_display = extract_client_first_names(client_full)
 
     venue_raw = raw.get("venue_name", "")

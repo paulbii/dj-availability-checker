@@ -123,6 +123,40 @@ class TestDateUtilities(unittest.TestCase):
 # Client Name Tests
 # =============================================================================
 
+class TestPreferenceTag(unittest.TestCase):
+    """Test stripping Paul's Ⓟ DJ-preference tag from client names."""
+
+    def test_single_preference(self):
+        from dj_core import strip_preference_tag
+        self.assertEqual(
+            strip_preference_tag("ⓅHK-Yijun Zhang and Felix Tiet"),
+            "Yijun Zhang and Felix Tiet"
+        )
+
+    def test_ranked_preferences(self):
+        from dj_core import strip_preference_tag
+        self.assertEqual(
+            strip_preference_tag("ⓅHK/PB-Jane Smith and Jim Williams"),
+            "Jane Smith and Jim Williams"
+        )
+
+    def test_stray_spaces_around_dash(self):
+        from dj_core import strip_preference_tag
+        self.assertEqual(
+            strip_preference_tag("ⓅHK/PB - Jane Smith and Jim Williams"),
+            "Jane Smith and Jim Williams"
+        )
+
+    def test_untagged_unchanged(self):
+        from dj_core import strip_preference_tag
+        self.assertEqual(
+            strip_preference_tag("Anya Hee and Hilal Ahmad"),
+            "Anya Hee and Hilal Ahmad"
+        )
+        self.assertEqual(strip_preference_tag("Smith-Jones Wedding"), "Smith-Jones Wedding")
+        self.assertEqual(strip_preference_tag(""), "")
+
+
 class TestClientNameExtraction(unittest.TestCase):
     """Test extracting first names for calendar titles."""
 
@@ -855,6 +889,61 @@ class TestBookingParsing(unittest.TestCase):
             self.assertTrue(booking["has_planner"])
             self.assertFalse(booking["is_unassigned"])
             self.assertEqual(booking["date"], datetime(2026, 11, 18))
+        finally:
+            os.unlink(path)
+
+    def test_fm_format_preference_tag_stripped(self):
+        data = {
+            "FMeventDate": "05/23/2027",
+            "FMstartTime": "6:00",
+            "FMendTime": "10:00",
+            "FMclient": "ⓅHK/PB-Fake Tagged and Test Client",
+            "FMvenue": "Test Venue",
+            "FMvenueAddress": "456 Nowhere Blvd***Faketown, CA 99998",
+            "FMDJ1": "Unassigned",
+            "FMDJ2": "Paul Burchfield",
+            "FMsound": "Standard Speakers",
+            "FMcersound": "0",
+            "MailCoordinator": "",
+        }
+        path = self._write_json(data)
+        try:
+            booking = parse_booking_data(path)
+            self.assertEqual(booking["client_full"], "Fake Tagged and Test Client")
+            self.assertEqual(booking["client_display"], "Fake and Test")
+        finally:
+            os.unlink(path)
+
+    def test_clean_format_preference_tag_stripped(self):
+        data = {
+            "event_date": "2027-05-23",
+            "start_time": "6:00",
+            "end_time": "10:00",
+            "client_name": "ⓅHK-Fake Tagged and Test Client",
+            "venue_name": "Test Venue",
+            "assigned_dj": "Unassigned",
+        }
+        path = self._write_json(data)
+        try:
+            booking = parse_booking_data(path)
+            self.assertEqual(booking["client_full"], "Fake Tagged and Test Client")
+            self.assertEqual(booking["client_display"], "Fake and Test")
+        finally:
+            os.unlink(path)
+
+    def test_nurture_preference_tag_stripped(self):
+        from nurture_scheduler import parse_booking_for_nurture
+        data = {
+            "FMeventDate": "05/23/2027",
+            "FMclient": "ⓅHK/PB-Fake Tagged and Test Client",
+            "FMvenue": "Test Venue",
+            "FMDJ1": "Unassigned",
+            "FMemail1": "fake@test.com",
+        }
+        path = self._write_json(data)
+        try:
+            booking = parse_booking_for_nurture(path)
+            self.assertEqual(booking["couple_name"], "Fake Tagged and Test Client")
         finally:
             os.unlink(path)
 

@@ -11,6 +11,7 @@ import calendar
 import time
 from googleapiclient.discovery import build
 import html
+import re
 import requests
 from dataclasses import dataclass
 from functools import lru_cache
@@ -269,6 +270,16 @@ def get_default_cell_value(dj_name, date_obj):
 
     # Henry, Paul, Stephanie -- always blank
     return ""
+
+
+def strip_preference_tag(client_name):
+    """
+    Remove Paul's DJ-preference tag from the front of a client name.
+    "ⓅHK-Jane Smith and Jim Williams" → "Jane Smith and Jim Williams"
+    "ⓅHK/PB-Jane Smith and Jim Williams" → "Jane Smith and Jim Williams"
+    Untagged names pass through unchanged.
+    """
+    return re.sub(r"^Ⓟ[A-Z/]+\s*-\s*", "", client_name)
 
 
 def extract_client_first_names(client_name):

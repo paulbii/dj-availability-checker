@@ -36,7 +36,7 @@ import subprocess
 from datetime import datetime, timedelta
 
 # Import DJ data from shared core
-from dj_core import DJ_EMAILS, DJ_NAME_MAP, get_dj_short_name
+from dj_core import DJ_EMAILS, DJ_NAME_MAP, get_dj_short_name, strip_preference_tag
 
 
 # =============================================================================
@@ -88,7 +88,7 @@ def parse_booking_json(json_path):
     if "FMeventDate" in raw:
         return {
             "event_date": raw.get("FMeventDate", ""),
-            "client_name": raw.get("FMclient", ""),
+            "client_name": strip_preference_tag(raw.get("FMclient", "")),
             "venue_name": raw.get("FMvenue", ""),
             "assigned_dj": get_dj_short_name(raw.get("FMDJ1", "")),
             "secondary_dj": get_dj_short_name(raw.get("FMDJ2", "")),
@@ -97,7 +97,7 @@ def parse_booking_json(json_path):
         dj_name = raw.get("assigned_dj", "")
         return {
             "event_date": raw.get("event_date", ""),
-            "client_name": raw.get("client_name", ""),
+            "client_name": strip_preference_tag(raw.get("client_name", "")),
             "venue_name": raw.get("venue_name", ""),
             "assigned_dj": get_dj_short_name(dj_name) if dj_name else "",
             "secondary_dj": raw.get("secondary_dj", ""),
