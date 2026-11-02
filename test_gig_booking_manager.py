@@ -1340,3 +1340,45 @@ class TestColumnMaps(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDeleteHoldCalendarEvent(unittest.TestCase):
+    """RESERVED -> BOOKED removes the 'Hold to DJ' event: found over CalDAV,
+    deleted in Calendar.app by id. No whose-clause scan."""
+
+    DATE = datetime(2026, 9, 26)
+
+    @staticmethod
+    def listing_of(*pairs):
+        return lambda calendar_name, day: list(pairs)
+
+    @mock.patch("gig_booking_manager.subprocess.run")
+    def test_hold_found_is_deleted_by_id(self, mock_run):
+        import gig_booking_manager
+        mock_run.return_value = mock.Mock(stdout="1", returncode=0, stderr="")
+        deleted = gig_booking_manager.delete_hold_calendar_event(
+            self.DATE, "[PB]",
+            fetch_day=self.listing_of(("u7", "[PB] Hold to DJ"), ("u1", "[PB] Chen and Lee")))
+        self.assertTrue(deleted)
+        script = mock_run.call_args.args[0][2]
+        self.assertIn('event id "u7"', script)
+        self.assertNotIn('"u1"', script)
+        self.assertNotIn("whose", script)
+
+    @mock.patch("gig_booking_manager.subprocess.run")
+    def test_no_hold_touches_calendar_app_not_at_all(self, mock_run):
+        import gig_booking_manager
+        deleted = gig_booking_manager.delete_hold_calendar_event(
+            self.DATE, "[PB]", fetch_day=self.listing_of(("u8", "[HK] Hold to DJ")))
+        self.assertFalse(deleted)
+        mock_run.assert_not_called()
+
+    @mock.patch("gig_booking_manager.subprocess.run")
+    def test_caldav_failure_is_false_and_writes_nothing(self, mock_run):
+        import gig_booking_manager
+        from calendar_read import CalendarReadError
+        def broken(calendar_name, day):
+            raise CalendarReadError("server down")
+        deleted = gig_booking_manager.delete_hold_calendar_event(self.DATE, "[PB]", fetch_day=broken)
+        self.assertFalse(deleted)
+        mock_run.assert_not_called()

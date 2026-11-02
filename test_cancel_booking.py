@@ -75,118 +75,175 @@ class TestAcceptableEventTitles(unittest.TestCase):
         self.assertEqual(len(titles), 1)
 
 
+def listing_of(*pairs):
+    """A fake CalDAV day read: ignores the calendar and date, returns the pairs."""
+    return lambda calendar_name, day: list(pairs)
+
+
+def broken_listing(calendar_name, day):
+    from calendar_read import CalendarReadError
+    raise CalendarReadError("server down")
+
+
 class TestDeleteBookingEvent(unittest.TestCase):
-    """Result protocol: ('deleted', n) | ('not_found', 0) | ('ambiguous', titles) | ('error', msg)."""
+    """Result protocol: ('deleted', n) | ('not_found', 0) | ('ambiguous', titles) | ('error', msg).
+
+    The day's events come from CalDAV as (uid, title); the matching ones are
+    deleted in Calendar.app by `event id`. No `whose` scan anywhere."""
 
     @patch("cancel_booking.subprocess.run")
-    def test_exact_match_deleted(self, mock_run):
+    def test_exact_match_deleted_by_id(self, mock_run):
         mock_run.return_value = fake_result("DELETED:1")
-        status, payload = delete_booking_calendar_event(DATE, "[PB]", [TITLE])
-        self.assertEqual(status, "deleted")
-        self.assertEqual(payload, 1)
-
-    @patch("cancel_booking.subprocess.run")
-    def test_script_carries_all_acceptable_titles(self, mock_run):
-        mock_run.return_value = fake_result("DELETED:1")
-        delete_booking_calendar_event(
-            DATE, "[PB]", ["[PB] Jaylin and Julie", "[PB] Julie and Jaylin"])
+        status, payload = delete_booking_calendar_event(
+            DATE, "[PB]", [TITLE], fetch_day=listing_of(("u1", TITLE)))
+        self.assertEqual((status, payload), ("deleted", 1))
         script = mock_run.call_args.args[0][2]
-        self.assertIn("[PB] Jaylin and Julie", script)
-        self.assertIn("[PB] Julie and Jaylin", script)
+        self.assertIn('event id "u1"', script)
+        self.assertNotIn("whose", script)
+
+    @patch("cancel_booking.subprocess.run")
+    def test_swapped_name_order_is_deleted(self, mock_run):
+        mock_run.return_value = fake_result("DELETED:1")
+        status, _ = delete_booking_calendar_event(
+            DATE, "[PB]", ["[PB] Jaylin and Julie", "[PB] Julie and Jaylin"],
+            fetch_day=listing_of(("u1", "[PB] Jaylin and Julie")))
+        self.assertEqual(status, "deleted")
+        self.assertIn('event id "u1"', mock_run.call_args.args[0][2])
+
+    @patch("cancel_booking.subprocess.run")
+    def test_title_match_is_case_insensitive_like_applescript_was(self, mock_run):
+        mock_run.return_value = fake_result("DELETED:1")
+        status, _ = delete_booking_calendar_event(
+            DATE, "[PB]", [TITLE], fetch_day=listing_of(("u1", "[pb] JULIE and Jaylin")))
+        self.assertEqual(status, "deleted")
 
     @patch("cancel_booking.subprocess.run")
     def test_duplicate_exact_matches_all_deleted(self, mock_run):
         mock_run.return_value = fake_result("DELETED:2")
-        status, payload = delete_booking_calendar_event(DATE, "[PB]", [TITLE])
-        self.assertEqual(status, "deleted")
-        self.assertEqual(payload, 2)
+        status, payload = delete_booking_calendar_event(
+            DATE, "[PB]", [TITLE], fetch_day=listing_of(("u1", TITLE), ("u2", TITLE)))
+        self.assertEqual((status, payload), ("deleted", 2))
+        script = mock_run.call_args.args[0][2]
+        self.assertIn('"u1"', script)
+        self.assertIn('"u2"', script)
 
     @patch("cancel_booking.subprocess.run")
-    def test_no_events_at_all(self, mock_run):
-        mock_run.return_value = fake_result("NONE")
-        status, payload = delete_booking_calendar_event(DATE, "[PB]", [TITLE])
+    def test_no_events_at_all_touches_nothing(self, mock_run):
+        status, payload = delete_booking_calendar_event(DATE, "[PB]", [TITLE], fetch_day=listing_of())
         self.assertEqual(status, "not_found")
+        mock_run.assert_not_called()
+
+    @patch("cancel_booking.subprocess.run")
+    def test_other_djs_event_is_not_a_candidate(self, mock_run):
+        status, _ = delete_booking_calendar_event(
+            DATE, "[PB]", [TITLE], fetch_day=listing_of(("u5", "[HK] Julie and Jaylin")))
+        self.assertEqual(status, "not_found")
+        mock_run.assert_not_called()
 
     @patch("cancel_booking.subprocess.run")
     def test_initials_match_but_wrong_title_deletes_nothing(self, mock_run):
         """The second-booking-same-day case: [PB] Chen and Lee must survive."""
-        mock_run.return_value = fake_result("FOUND:[PB] Chen and Lee")
-        status, payload = delete_booking_calendar_event(DATE, "[PB]", [TITLE])
-        self.assertEqual(status, "ambiguous")
-        self.assertEqual(payload, ["[PB] Chen and Lee"])
+        status, payload = delete_booking_calendar_event(
+            DATE, "[PB]", [TITLE], fetch_day=listing_of(("u2", "[PB] Chen and Lee")))
+        self.assertEqual((status, payload), ("ambiguous", ["[PB] Chen and Lee"]))
+        mock_run.assert_not_called()
 
     @patch("cancel_booking.subprocess.run")
     def test_multiple_wrong_titles_all_reported(self, mock_run):
-        mock_run.return_value = fake_result("FOUND:[PB] Chen and Lee||[PB] Smith Wedding")
-        status, payload = delete_booking_calendar_event(DATE, "[PB]", [TITLE])
-        self.assertEqual(status, "ambiguous")
-        self.assertEqual(payload, ["[PB] Chen and Lee", "[PB] Smith Wedding"])
+        status, payload = delete_booking_calendar_event(
+            DATE, "[PB]", [TITLE],
+            fetch_day=listing_of(("u2", "[PB] Chen and Lee"), ("u3", "[PB] Smith Wedding")))
+        self.assertEqual((status, payload), ("ambiguous", ["[PB] Chen and Lee", "[PB] Smith Wedding"]))
+
+    @patch("cancel_booking.subprocess.run")
+    def test_backup_and_hold_events_are_never_candidates(self, mock_run):
+        status, _ = delete_booking_calendar_event(
+            DATE, "[PB]", [TITLE],
+            fetch_day=listing_of(("u3", "[PB] BACKUP DJ"), ("u4", "[PB] Hold to DJ")))
+        self.assertEqual(status, "not_found")
+        mock_run.assert_not_called()
+
+    @patch("cancel_booking.subprocess.run")
+    def test_caldav_read_failure_is_error_not_not_found(self, mock_run):
+        status, payload = delete_booking_calendar_event(DATE, "[PB]", [TITLE], fetch_day=broken_listing)
+        self.assertEqual(status, "error")
+        self.assertIn("server down", payload)
+        mock_run.assert_not_called()
 
     @patch("cancel_booking.subprocess.run")
     def test_timeout_is_error_not_not_found(self, mock_run):
         """The 7/29 incident: a timeout must never read as 'no events found'."""
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="osascript", timeout=180)
-        status, payload = delete_booking_calendar_event(DATE, "[PB]", [TITLE])
+        status, payload = delete_booking_calendar_event(
+            DATE, "[PB]", [TITLE], fetch_day=listing_of(("u1", TITLE)))
         self.assertEqual(status, "error")
         self.assertIn("timed out", payload.lower())
 
     @patch("cancel_booking.subprocess.run")
     def test_nonzero_returncode_is_error(self, mock_run):
         mock_run.return_value = fake_result("", returncode=1, stderr="Not authorized")
-        status, payload = delete_booking_calendar_event(DATE, "[PB]", [TITLE])
+        status, payload = delete_booking_calendar_event(
+            DATE, "[PB]", [TITLE], fetch_day=listing_of(("u1", TITLE)))
         self.assertEqual(status, "error")
         self.assertIn("Not authorized", payload)
 
     @patch("cancel_booking.subprocess.run")
     def test_garbage_stdout_is_error(self, mock_run):
         mock_run.return_value = fake_result("execution error: whatever")
-        status, payload = delete_booking_calendar_event(DATE, "[PB]", [TITLE])
+        status, payload = delete_booking_calendar_event(
+            DATE, "[PB]", [TITLE], fetch_day=listing_of(("u1", TITLE)))
         self.assertEqual(status, "error")
 
     @patch("cancel_booking.subprocess.run")
     def test_timeout_is_180s(self, mock_run):
         mock_run.return_value = fake_result("DELETED:1")
-        delete_booking_calendar_event(DATE, "[PB]", [TITLE])
+        delete_booking_calendar_event(DATE, "[PB]", [TITLE], fetch_day=listing_of(("u1", TITLE)))
         self.assertEqual(mock_run.call_args.kwargs.get("timeout"), 180)
-
-    @patch("cancel_booking.subprocess.run")
-    def test_script_contains_exact_title_and_guards(self, mock_run):
-        """The generated AppleScript must carry the exact title and still
-        exclude BACKUP DJ / Hold to DJ from the ambiguous listing."""
-        mock_run.return_value = fake_result("DELETED:1")
-        delete_booking_calendar_event(DATE, "[PB]", [TITLE])
-        script = mock_run.call_args.args[0][2]
-        self.assertIn(TITLE, script)
-        self.assertIn("BACKUP DJ", script)
-        self.assertIn("Hold to DJ", script)
-        self.assertIn("October 16, 2026", script)
 
 
 class TestDeleteBackupEvent(unittest.TestCase):
 
     @patch("cancel_booking.subprocess.run")
-    def test_deleted(self, mock_run):
+    def test_deleted_by_id(self, mock_run):
         mock_run.return_value = fake_result("DELETED:1")
-        status, payload = delete_backup_calendar_event(DATE, "Felipe")
-        self.assertEqual(status, "deleted")
-        self.assertEqual(payload, 1)
+        status, payload = delete_backup_calendar_event(
+            DATE, "Felipe", fetch_day=listing_of(("u9", "[FS] BACKUP DJ"), ("u1", TITLE)))
+        self.assertEqual((status, payload), ("deleted", 1))
+        script = mock_run.call_args.args[0][2]
+        self.assertIn('event id "u9"', script)
+        self.assertNotIn('"u1"', script)
+        self.assertNotIn("whose", script)
+
+    @patch("cancel_booking.subprocess.run")
+    def test_other_djs_backup_is_not_found(self, mock_run):
+        status, _ = delete_backup_calendar_event(
+            DATE, "Felipe", fetch_day=listing_of(("u8", "[HK] BACKUP DJ")))
+        self.assertEqual(status, "not_found")
+        mock_run.assert_not_called()
 
     @patch("cancel_booking.subprocess.run")
     def test_not_found(self, mock_run):
-        mock_run.return_value = fake_result("NONE")
-        status, payload = delete_backup_calendar_event(DATE, "Felipe")
+        status, _ = delete_backup_calendar_event(DATE, "Felipe", fetch_day=listing_of())
         self.assertEqual(status, "not_found")
+        mock_run.assert_not_called()
+
+    @patch("cancel_booking.subprocess.run")
+    def test_caldav_read_failure_is_error(self, mock_run):
+        status, payload = delete_backup_calendar_event(DATE, "Felipe", fetch_day=broken_listing)
+        self.assertEqual(status, "error")
+        mock_run.assert_not_called()
 
     @patch("cancel_booking.subprocess.run")
     def test_timeout_is_error(self, mock_run):
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="osascript", timeout=180)
-        status, payload = delete_backup_calendar_event(DATE, "Felipe")
+        status, _ = delete_backup_calendar_event(
+            DATE, "Felipe", fetch_day=listing_of(("u9", "[FS] BACKUP DJ")))
         self.assertEqual(status, "error")
 
     @patch("cancel_booking.subprocess.run")
     def test_timeout_is_180s(self, mock_run):
         mock_run.return_value = fake_result("DELETED:1")
-        delete_backup_calendar_event(DATE, "Felipe")
+        delete_backup_calendar_event(DATE, "Felipe", fetch_day=listing_of(("u9", "[FS] BACKUP DJ")))
         self.assertEqual(mock_run.call_args.kwargs.get("timeout"), 180)
 
 

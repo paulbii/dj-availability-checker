@@ -88,3 +88,33 @@ def fetch_events(calendar_names, start_date, end_date, connect=_connect):
         raise CalendarReadError(f"{type(e).__name__}: {e}") from e
 
     return sorted(events)
+
+
+def fetch_day_events(calendar_name, day, connect=_connect):
+    """(uid, summary) for every event that STARTS on `day` on one calendar.
+
+    The uid is the iCalendar UID, which is also what Calendar.app's `event id`
+    resolves, so a caller can find an event here in under a second and then
+    edit or delete it in Calendar.app by id instead of a whole-calendar scan.
+    An event from the day before that runs past midnight is that day's event
+    and is left out. Sorted by summary.
+
+    Raises CalendarReadError if the calendar can't be read.
+    """
+    if calendar_name not in CALENDAR_URLS:
+        raise CalendarReadError(f"Unknown calendar: {calendar_name}")
+
+    start = datetime.datetime.combine(day, datetime.time.min, tzinfo=TIMEZONE)
+    end = start + datetime.timedelta(days=1)
+    try:
+        calendar = connect([calendar_name])[calendar_name]
+        found = []
+        for event in calendar.search(start=start, end=end, event=True, expand=True):
+            vevent = event.icalendar_component
+            if event_local_date(vevent.get("dtstart").dt) != day:
+                continue
+            found.append((str(vevent.get("uid", "")), str(vevent.get("summary", ""))))
+    except Exception as e:
+        raise CalendarReadError(f"{type(e).__name__}: {e}") from e
+
+    return sorted(found, key=lambda pair: pair[1])

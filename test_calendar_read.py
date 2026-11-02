@@ -14,15 +14,17 @@ import unittest
 from datetime import date, datetime, timezone
 
 import calendar_read
-from calendar_read import CalendarReadError, fetch_events, event_local_date
+from calendar_read import CalendarReadError, fetch_events, fetch_day_events, event_local_date
 
 
 class FakeEvent:
-    def __init__(self, summary, dtstart):
+    def __init__(self, summary, dtstart, uid=None):
         from icalendar import Event
         self.icalendar_component = Event()
         self.icalendar_component.add("summary", summary)
         self.icalendar_component.add("dtstart", dtstart)
+        if uid:
+            self.icalendar_component.add("uid", uid)
 
 
 class FakeCalendar:
@@ -121,3 +123,45 @@ class TestFetchEvents(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFetchDayEvents(unittest.TestCase):
+    """(uid, summary) for the events that START on one day of one calendar.
+
+    The uid is the iCalendar UID, which is also what Calendar.app's
+    `event id` resolves, so a caller can find over CalDAV and edit by id."""
+
+    def test_returns_uid_and_summary_sorted_by_summary(self):
+        gigs = FakeCalendar([
+            FakeEvent("[UP] Jenna and Tyler",
+                      datetime(2027, 5, 1, 0, 0, tzinfo=timezone.utc), uid="u-jenna"),  # 5 PM PDT 4/30
+            FakeEvent("[HK] BACKUP DJ", date(2027, 4, 30), uid="u-backup"),
+        ])
+        self.assertEqual(
+            fetch_day_events("Gigs", date(2027, 4, 30), connect=connect_to({"Gigs": gigs})),
+            [("u-backup", "[HK] BACKUP DJ"), ("u-jenna", "[UP] Jenna and Tyler")])
+
+    def test_event_from_the_day_before_running_past_midnight_is_excluded(self):
+        gigs = FakeCalendar([
+            FakeEvent("[PB] Late Night", datetime(2027, 4, 29, 22, 0, tzinfo=calendar_read.TIMEZONE), uid="u-late"),
+        ])
+        self.assertEqual(
+            fetch_day_events("Gigs", date(2027, 4, 30), connect=connect_to({"Gigs": gigs})), [])
+
+    def test_searches_exactly_that_day_with_expansion(self):
+        gigs = FakeCalendar([])
+        fetch_day_events("Gigs", date(2027, 4, 30), connect=connect_to({"Gigs": gigs}))
+        (start, end, event, expand), = gigs.searches
+        self.assertEqual(start, datetime(2027, 4, 30, 0, 0, tzinfo=calendar_read.TIMEZONE))
+        self.assertEqual(end, datetime(2027, 5, 1, 0, 0, tzinfo=calendar_read.TIMEZONE))
+        self.assertTrue(event)
+        self.assertTrue(expand)
+
+    def test_search_failure_raises_never_empty(self):
+        gigs = FakeCalendar(error=ConnectionError("server down"))
+        with self.assertRaises(CalendarReadError):
+            fetch_day_events("Gigs", date(2027, 4, 30), connect=connect_to({"Gigs": gigs}))
+
+    def test_unknown_calendar_raises(self):
+        with self.assertRaises(CalendarReadError):
+            fetch_day_events("Nope", date(2027, 4, 30), connect=connect_to({}))

@@ -47,8 +47,8 @@ import os
 import re
 import subprocess
 import sys
-from datetime import timedelta
 
+import calendar_read
 from dj_core import BACKUP_ELIGIBLE_DJS, COLUMN_MAPS, DJ_EMAILS, get_dj_initials
 from gig_booking_manager import (
     CALENDAR_NAME,
@@ -186,49 +186,20 @@ def find_assigned_event(listing, bracket, client_display):
     return None
 
 
-def parse_listing(stdout):
-    rows = []
-    for line in (stdout or "").splitlines():
-        if "\t" not in line:
-            continue
-        uid, summary = line.split("\t", 1)
-        rows.append((uid.strip(), summary.strip()))
-    return rows
-
-
 # =============================================================================
-# CALENDAR (AppleScript: the only path that carries attendees)
+# CALENDAR (read over CalDAV; edit via AppleScript, the only path that carries
+# attendees). The event is found by uid over CalDAV in under a second and then
+# addressed in Calendar.app with `event id`, a direct lookup. A `whose` clause
+# walks the whole Gigs calendar: 30s for a day listing, and `first event whose
+# uid is` ran 1m54s and then failed on a valid uid (measured 2026-11-02).
 # =============================================================================
-
-def _as_date(date_obj):
-    return date_obj.strftime("%B %d, %Y")
-
-
-def listing_script(date_obj):
-    """Every event on the date in the Gigs calendar, one 'uid<TAB>summary' per line."""
-    start = _as_date(date_obj)
-    end = _as_date(date_obj + timedelta(days=1))
-    return f'''
-    -- LISTING
-    tell application "Calendar"
-        tell calendar "{CALENDAR_NAME}"
-            set evs to (every event whose start date >= date "{start} 12:00:00 AM" and start date < date "{end} 12:00:00 AM")
-            set out to ""
-            repeat with ev in evs
-                set out to out & (uid of ev) & tab & (summary of ev) & linefeed
-            end repeat
-            return out
-        end tell
-    end tell
-    '''
-
 
 def modify_script(uid, new_title, invitee_email):
     title_esc = new_title.replace('"', '\\"')
     return f'''
     tell application "Calendar"
         tell calendar "{CALENDAR_NAME}"
-            set ev to first event whose uid is "{uid}"
+            set ev to event id "{uid}"
             set summary of ev to "{title_esc}"
             tell ev
                 make new attendee at end of attendees with properties {{email:"{invitee_email}"}}
@@ -249,7 +220,8 @@ def run_osascript(script):
 # THE FLOW
 # =============================================================================
 
-def assign(booking, sheets, osa=run_osascript, dry_run=False, test_mode=False,
+def assign(booking, sheets, osa=run_osascript, fetch_day=calendar_read.fetch_day_events,
+           dry_run=False, test_mode=False,
            log=print, warn=None, notify=None,
            choose_backup=show_backup_dialog, conflicts=check_calendar_conflicts,
            make_backup_event=create_allday_backup_event,
@@ -295,7 +267,9 @@ def assign(booking, sheets, osa=run_osascript, dry_run=False, test_mode=False,
                     "A BACKUP cell is never changed to BOOKED by this button. Nothing was written. "
                     f"Move the backup to another DJ first, then press again.")
 
-    listing = parse_listing(osa(listing_script(date_obj)))
+    # CalendarReadError propagates: nothing has been written yet, and main()
+    # turns it into the error dialog. It never reads as "nothing on the calendar".
+    listing = fetch_day(CALENDAR_NAME, date_obj.date())
     try:
         target = pick_unassigned_event(listing, client)
     except ValueError as e:
@@ -455,6 +429,7 @@ def main():
         print(msg)
         lines.append(msg)
 
+    log("Python started")
     booking = parse_booking_data(args.json_path)
     # The dry run reads the live matrix too: assign() exits before any write,
     # so the validation it reports is against the real row, not a mock.

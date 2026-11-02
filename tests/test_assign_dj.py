@@ -47,17 +47,21 @@ def booking(dj="Henry", client="Cienna and Joseph", planner=False, date="2027-01
 
 
 class FakeOsa:
-    """Stands in for osascript: answers the day listing, records every script run."""
+    """Stands in for osascript (records every script run) and for the CalDAV
+    day read (answers the listing, records what was asked for)."""
 
     def __init__(self, listing):
         self.listing = listing  # list of (uid, summary) on the date
         self.scripts = []
+        self.day_calls = []
 
     def __call__(self, script):
         self.scripts.append(script)
-        if "LISTING" in script:
-            return "\n".join(f"{uid}\t{summary}" for uid, summary in self.listing)
         return ""
+
+    def fetch_day(self, calendar_name, day):
+        self.day_calls.append((calendar_name, day))
+        return list(self.listing)
 
 
 # ---------------------------------------------------------------------------
@@ -178,8 +182,8 @@ class TestAssignFlow(unittest.TestCase):
     def run_assign(self, b, dry_run=False, test_mode=False):
         # Phase 4 is covered in TestBackupPhase; here it is stubbed so no test
         # ever reaches the real dialog or calendar.
-        return assign_dj.assign(b, self.sheets, osa=self.osa, dry_run=dry_run,
-                                test_mode=test_mode, log=self.log.append,
+        return assign_dj.assign(b, self.sheets, osa=self.osa, fetch_day=self.osa.fetch_day,
+                                dry_run=dry_run, test_mode=test_mode, log=self.log.append,
                                 choose_backup=FakeChooser(None),
                                 conflicts=lambda d, br: [],
                                 make_backup_event=lambda d, dj, test_mode=False: "stub",
@@ -199,6 +203,29 @@ class TestAssignFlow(unittest.TestCase):
         self.assertIn('"u1"', modify[0])
         self.assertIn("[HK] Cienna and Joseph", modify[0])
         self.assertIn("henry@bigfundj.com", modify[0])
+
+    def test_day_listing_is_read_over_caldav_not_scanned_in_calendar_app(self):
+        self.run_assign(booking("Henry"))
+        self.assertEqual(self.osa.day_calls, [("Gigs", datetime(2027, 1, 23).date())])
+        self.assertFalse(any("whose" in s for s in self.osa.scripts))
+
+    def test_calendar_event_is_edited_by_id_not_by_scan(self):
+        self.run_assign(booking("Henry"))
+        modify = [s for s in self.osa.scripts if "set summary" in s][0]
+        self.assertIn('event id "u1"', modify)
+        self.assertNotIn("whose", modify)
+
+    def test_caldav_read_failure_raises_and_writes_nothing(self):
+        from calendar_read import CalendarReadError
+        def broken(calendar_name, day):
+            raise CalendarReadError("server down")
+        with self.assertRaises(CalendarReadError):
+            assign_dj.assign(booking("Henry"), self.sheets, osa=self.osa, fetch_day=broken,
+                             log=self.log.append, choose_backup=FakeChooser(None),
+                             conflicts=lambda d, br: [], make_backup_event=lambda d, dj, test_mode=False: "stub",
+                             make_email_folder=lambda b, dry_run=False: None)
+        self.assertEqual(self.sheets.writes, [])
+        self.assertEqual(self.osa.scripts, [])
 
     def test_test_mode_invites_paul(self):
         self.run_assign(booking("Henry"), test_mode=True)
@@ -315,7 +342,8 @@ class TestBackupPhase(unittest.TestCase):
         def default_event(date_obj, dj, test_mode=False):
             self.events.append((date_obj, dj, test_mode))
             return f"[{dj[:2].upper()}] BACKUP DJ"
-        return assign_dj.assign(b, self.sheets, osa=self.osa, dry_run=dry_run, test_mode=test_mode,
+        return assign_dj.assign(b, self.sheets, osa=self.osa, fetch_day=self.osa.fetch_day,
+                                dry_run=dry_run, test_mode=test_mode,
                                 log=self.log.append, choose_backup=chooser,
                                 conflicts=conflicts or default_conflicts,
                                 make_backup_event=make_event or default_event,
@@ -417,7 +445,8 @@ class TestEmailFolderStep(unittest.TestCase):
             if raise_error:
                 raise RuntimeError("IMAP down")
             return folder_result
-        return assign_dj.assign(b, self.sheets, osa=FakeOsa([("u1", "[UP] Cienna and Joseph")]),
+        osa = FakeOsa([("u1", "[UP] Cienna and Joseph")])
+        return assign_dj.assign(b, self.sheets, osa=osa, fetch_day=osa.fetch_day,
                                 log=self.log.append, choose_backup=FakeChooser(None),
                                 conflicts=lambda d, br: [], make_backup_event=lambda d, dj, test_mode=False: "x",
                                 make_email_folder=make_folder)

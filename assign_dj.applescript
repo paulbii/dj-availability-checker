@@ -12,6 +12,7 @@
 --   osascript osascript /Users/paulburchfield/Documents/projects/dj-availability-checker/assign_dj.scpt
 
 on run argv
+	set startedAt to current date
 	-- Determine flags from command-line arguments
 	set extraFlags to ""
 	repeat with arg in argv
@@ -69,7 +70,11 @@ on run argv
 	-- The script surfaces its own results: a macOS notification on success
 	-- and native dialogs for conflicts/errors. Full output is logged for review.
 	set logPath to "/tmp/bigfun-assign-dj.log"
-	set shellCmd to "cd " & quoted form of scriptDir & " && /Users/paulburchfield/Documents/projects/dj-availability-checker/.venv/bin/python " & quoted form of pythonScript & " " & quoted form of jsonPath & extraFlags & " > " & quoted form of logPath & " 2>&1"
+	-- One line per phase, each stamped with the clock time, so a slow run shows where
+	-- the time went (tail -f the log). -u keeps Python unbuffered through the pipe;
+	-- pipefail keeps Python's exit status so the failure notification still fires.
+	do shell script "echo \"$(date +%T) Button pressed; Safari extraction took " & (round ((current date) - startedAt)) & "s; starting Python\" > " & quoted form of logPath
+	set shellCmd to "cd " & quoted form of scriptDir & " && set -o pipefail; /Users/paulburchfield/Documents/projects/dj-availability-checker/.venv/bin/python -u " & quoted form of pythonScript & " " & quoted form of jsonPath & extraFlags & " 2>&1 | while IFS= read -r line; do printf '%s %s\n' \"$(date +%T)\" \"$line\"; done >> " & quoted form of logPath
 	try
 		do shell script shellCmd
 	on error

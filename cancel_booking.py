@@ -34,6 +34,7 @@ from dj_core import (
     get_full_inquiries_for_date,
 )
 
+import calendar_read
 from gig_booking_manager import (
     CALENDAR_NAME,
     BOOKING_LOG_FORM_URL,
@@ -55,9 +56,11 @@ from gig_booking_manager import (
 
 # ── Calendar deletion ────────────────────────────────────────────────────────
 #
-# The whose-clause scan is inherently slow (Calendar.app walks the entire Gigs
-# calendar), so the timeout is generous. 30s was not enough: on 2026-07-29 the
-# delete timed out and was misreported as "no events found."
+# The day's events are read over CalDAV (under a second) and the matching ones
+# deleted in Calendar.app by `event id`, a direct lookup. The earlier
+# whose-clause scan walked the entire Gigs calendar: 30s was not enough, and on
+# 2026-07-29 the delete timed out and was misreported as "no events found."
+# The timeout stays generous; the id lookup takes well under a second.
 CALENDAR_TIMEOUT = 180
 
 
@@ -120,84 +123,76 @@ def acceptable_event_titles(booking):
     return titles
 
 
-def delete_booking_calendar_event(date_obj, initials_bracket, expected_titles):
+def _delete_by_id_script(uids):
+    """AppleScript that deletes each event by id and reports DELETED:<n>."""
+    deletes = "\n".join(f'            delete (event id "{u}")' for u in uids)
+    return f'''
+    tell application "Calendar"
+        tell calendar "{CALENDAR_NAME}"
+{deletes}
+            return "DELETED:{len(uids)}"
+        end tell
+    end tell
+    '''
+
+
+def delete_booking_calendar_event(date_obj, initials_bracket, expected_titles,
+                                  fetch_day=calendar_read.fetch_day_events):
     """
     Delete the booking calendar event for a DJ on a given date.
 
     Deletes only events whose title EXACTLY matches one of expected_titles
-    (from acceptable_event_titles). Events that merely share the initials
-    bracket — a second booking for the same DJ that day — are reported back,
-    never deleted. BACKUP DJ / Hold to DJ events are excluded from that
-    report; they are never deletion candidates here.
+    (from acceptable_event_titles; case-insensitive, as the AppleScript
+    comparison was). Events that merely share the initials bracket — a second
+    booking for the same DJ that day — are reported back, never deleted.
+    BACKUP DJ / Hold to DJ events are excluded from that report; they are
+    never deletion candidates here.
 
-    Returns (status, payload) per _run_calendar_delete.
+    Returns (status, payload) per _run_calendar_delete. A failed CalDAV read
+    is ("error", ...), never "not_found".
     """
-    date_str = date_obj.strftime("%B %d, %Y")  # "March 28, 2026"
-    escaped = [t.replace("\\", "\\\\").replace('"', '\\"') for t in expected_titles]
-    titles_list = "{" + ", ".join(f'"{t}"' for t in escaped) + "}"
+    try:
+        listing = fetch_day(CALENDAR_NAME, date_obj.date())
+    except calendar_read.CalendarReadError as e:
+        return ("error", f"calendar read failed: {e}")
 
-    script = f'''
-    tell application "Calendar"
-        tell calendar "{CALENDAR_NAME}"
-            set okTitles to {titles_list}
-            set matchingEvents to (every event whose start date >= date "{date_str} 12:00:00 AM" and start date < date "{date_str} 11:59:59 PM" and summary contains "{initials_bracket}")
-            set exactEvents to {{}}
-            set otherTitles to {{}}
-            repeat with anEvent in matchingEvents
-                set eventTitle to summary of anEvent
-                if okTitles contains eventTitle then
-                    set end of exactEvents to anEvent
-                else if eventTitle does not contain "BACKUP DJ" and eventTitle does not contain "Hold to DJ" then
-                    set end of otherTitles to eventTitle
-                end if
-            end repeat
-            if (count of exactEvents) > 0 then
-                repeat with anEvent in exactEvents
-                    delete anEvent
-                end repeat
-                return "DELETED:" & (count of exactEvents)
-            else if (count of otherTitles) > 0 then
-                set AppleScript's text item delimiters to "||"
-                set joined to otherTitles as text
-                set AppleScript's text item delimiters to ""
-                return "FOUND:" & joined
-            else
-                return "NONE"
-            end if
-        end tell
-    end tell
-    '''
-    return _run_calendar_delete(script)
+    bracket = initials_bracket.lower()
+    ok_titles = {t.lower() for t in expected_titles}
+    exact, others = [], []
+    for uid, title in listing:
+        lowered = title.lower()
+        if bracket not in lowered:
+            continue
+        if lowered in ok_titles:
+            exact.append(uid)
+        elif "backup dj" not in lowered and "hold to dj" not in lowered:
+            others.append(title)
+
+    if exact:
+        return _run_calendar_delete(_delete_by_id_script(exact))
+    if others:
+        return ("ambiguous", others)
+    return ("not_found", 0)
 
 
-def delete_backup_calendar_event(date_obj, backup_dj):
+def delete_backup_calendar_event(date_obj, backup_dj, fetch_day=calendar_read.fetch_day_events):
     """
     Delete the backup DJ's all-day calendar event on a given date.
 
-    Backup titles are formulaic ('BACKUP DJ' + initials), so the contains
-    match stays; only the timeout and error reporting changed.
-    Returns (status, payload) per _run_calendar_delete.
+    Backup titles are formulaic ('BACKUP DJ' + initials), so a contains match
+    on both is enough. Returns (status, payload) per _run_calendar_delete.
     """
-    date_str = date_obj.strftime("%B %d, %Y")
-    backup_initials = f"[{get_dj_initials(backup_dj)}]"
+    try:
+        listing = fetch_day(CALENDAR_NAME, date_obj.date())
+    except calendar_read.CalendarReadError as e:
+        return ("error", f"calendar read failed: {e}")
 
-    script = f'''
-    tell application "Calendar"
-        tell calendar "{CALENDAR_NAME}"
-            set backupEvents to (every event whose start date >= date "{date_str} 12:00:00 AM" and start date < date "{date_str} 11:59:59 PM" and summary contains "BACKUP DJ" and summary contains "{backup_initials}")
-            if (count of backupEvents) > 0 then
-                set deletedCount to count of backupEvents
-                repeat with anEvent in backupEvents
-                    delete anEvent
-                end repeat
-                return "DELETED:" & deletedCount
-            else
-                return "NONE"
-            end if
-        end tell
-    end tell
-    '''
-    return _run_calendar_delete(script)
+    backup_initials = f"[{get_dj_initials(backup_dj)}]".lower()
+    uids = [uid for uid, title in listing
+            if "backup dj" in title.lower() and backup_initials in title.lower()]
+    if not uids:
+        return ("not_found", 0)
+    return _run_calendar_delete(_delete_by_id_script(uids))
 
 
 # ── Backup DJ detection ──────────────────────────────────────────────────────

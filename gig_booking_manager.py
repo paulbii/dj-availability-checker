@@ -919,23 +919,33 @@ def create_allday_backup_event(date_obj, dj_name, test_mode=False):
     return title
 
 
-def delete_hold_calendar_event(date_obj, initials_bracket):
+def delete_hold_calendar_event(date_obj, initials_bracket, fetch_day=calendar_read.fetch_day_events):
     """
-    Delete a 'Hold to DJ' calendar event for a DJ on a given date.
+    Delete the 'Hold to DJ' calendar event for a DJ on a date.
     Called when converting a RESERVED status to BOOKED.
+
+    The day's events are read over CalDAV and the hold deleted in Calendar.app
+    by `event id` (a whole-calendar `whose` scan took 30s+).
     Returns True if an event was deleted, False otherwise.
     """
-    date_str = date_obj.strftime("%B %d, %Y")  # "September 26, 2026"
+    try:
+        listing = fetch_day(CALENDAR_NAME, date_obj.date())
+    except calendar_read.CalendarReadError as e:
+        print(f"  WARNING: Could not read the calendar to find the hold event: {e}")
+        return False
 
+    bracket = initials_bracket.lower()
+    uids = [uid for uid, title in listing
+            if "hold to dj" in title.lower() and bracket in title.lower()]
+    if not uids:
+        return False
+
+    deletes = "\n".join(f'            delete (event id "{u}")' for u in uids)
     script = f'''
     tell application "Calendar"
         tell calendar "{CALENDAR_NAME}"
-            set holdEvents to (every event whose start date >= date "{date_str} 12:00:00 AM" and start date < date "{date_str} 11:59:59 PM" and summary contains "Hold to DJ" and summary contains "{initials_bracket}")
-            set deletedCount to count of holdEvents
-            repeat with anEvent in holdEvents
-                delete anEvent
-            end repeat
-            return deletedCount
+{deletes}
+            return "{len(uids)}"
         end tell
     end tell
     '''

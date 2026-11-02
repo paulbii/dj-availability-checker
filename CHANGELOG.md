@@ -16,6 +16,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   starting at 8:00 sharp. Those still need a hand check. (2026-09-17)
 
 ### Changed
+- **Calendar lookups: find over CalDAV, edit by `event id`.** Assign DJ, Cancel Booking and
+  Book Event's hold delete no longer run `whose` clauses against the Gigs calendar. A `whose`
+  scan walks every event since 1989: the day listing took 30s and `first event whose uid is`
+  ran 1m54s and then failed on a valid uid. Now `calendar_read.fetch_day_events` returns the
+  day's (uid, summary) pairs in under a second and Calendar.app is addressed by id (0.5s).
+  Assign DJ measured 75s -> 5s on the same booking. A failed CalDAV read is an error, never
+  "nothing on the calendar". (2026-11-02)
+- **Button logs carry a clock time per line.** The three Stream Deck wrappers stamp each
+  Python line (`/tmp/bigfun-*.log`) and record Safari extraction time, so a slow run shows
+  which phase took it. Python runs unbuffered through the pipe and its exit status still
+  reaches the failure notification. `gig_booking_manager.applescript` and
+  `cancel_booking.applescript` are now in the repo as source (decompiled from the .scpt).
+  (2026-11-02)
 - **Setup days: no teardown padding on the calendar end.** Event Type = Setup now ends the
   calendar event at the Gig DB end time; the start still gets the arrival offset. Before this,
   every setup event carried the 60-minute pad and was hand-edited. (2026-09-16)
