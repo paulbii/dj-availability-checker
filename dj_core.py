@@ -93,6 +93,7 @@ DJ_INITIALS = {
     "Stefano": "SB",
     "Felipe": "FS",
     "Stephanie": "SD",
+    "Alan": "AD",        # roadie; emergency backup only, no Matrix column
     "Unknown": "UP",
 }
 
@@ -171,6 +172,7 @@ DJ_FULL_NAMES = {
     "SB": "Stefano Bortolin",
     "FS": "Felipe Silva",
     "SD": "Stephanie",
+    "AD": "Alan Do",
 }
 
 # Backup payment categories

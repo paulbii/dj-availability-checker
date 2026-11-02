@@ -35,6 +35,7 @@ from datetime import date, datetime, timedelta
 
 # Import shared DJ data and Google Sheets access from dj_core
 from dj_core import (
+    COLUMN_MAPS,
     DJ_INITIALS,
     init_google_sheets_from_file,
     get_bulk_availability_data,
@@ -369,6 +370,14 @@ def parse_calendar_events(events, initials_to_name, year=None):
             {k: sorted(v) for k, v in backups.items()})
 
 
+def calendar_initials_map():
+    """Bracket -> first name for every known person: {"[HK]": "Henry", ...}.
+    Built from dj_core.DJ_INITIALS so one list serves all tools; [UP] is left
+    out because an unassigned bracket is U + the DJ2 initial, handled in parse."""
+    return {f"[{initials}]": name
+            for name, initials in DJ_INITIALS.items() if name != "Unknown"}
+
+
 def fetch_master_calendar(year):
     """
     Pull the year's events from the Gigs and Wedding Faires calendars over
@@ -378,10 +387,7 @@ def fetch_master_calendar(year):
     or (None, None) if the calendar can't be read (the report then says
     "Gig DB + Matrix" so a partial run is visible).
     """
-    # Build reverse map: initials bracket -> DJ name
-    # DJ_INITIALS: {"Henry": "HK", "Woody": "WM", ...}
-    initials_to_name = {f"[{initials}]": name
-                        for name, initials in DJ_INITIALS.items() if name != "Unknown"}
+    initials_to_name = calendar_initials_map()
 
     print(f"  Querying calendar for {year}...")
     try:
@@ -404,9 +410,67 @@ def fetch_master_calendar(year):
 # COMPARISON ENGINE
 # =============================================================================
 
+# =============================================================================
+# ACCEPTED ITEMS — discrepancies Paul has looked at and chosen to leave alone
+# =============================================================================
+# Hand-written file, one line per item. A line pins the exact state, so if the
+# date changes shape it is flagged again. Free-text reason at the end.
+#
+#   2026 3/7   backup  matrix=none  cal=Henry,Paul              past date (Paul 11-02)
+#   2027 2/27  booking gigdb=Henry  matrix=none  cal=none       penciled in (Paul 7-27)
+#
+# kinds: backup (matrix, cal) and booking (gigdb, matrix, cal). "none" = empty.
+
+ACCEPTED_KINDS = {"backup": ("matrix", "cal"), "booking": ("gigdb", "matrix", "cal")}
+
+
+def parse_accepted(text):
+    """Parse the accepted-items file. Raises ValueError naming the bad line."""
+    entries = []
+    for n, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith('#'):
+            continue
+        tokens = line.split()
+        try:
+            year, date_key, kind = int(tokens[0]), tokens[1], tokens[2]
+        except (IndexError, ValueError):
+            raise ValueError(f"accepted file line {n}: expected 'YEAR M/D KIND ...': {raw}")
+        if kind not in ACCEPTED_KINDS:
+            raise ValueError(f"accepted file line {n}: kind must be one of "
+                             f"{sorted(ACCEPTED_KINDS)}: {raw}")
+        if not re.fullmatch(r'\d{1,2}/\d{1,2}', date_key):
+            raise ValueError(f"accepted file line {n}: date must be M/D: {raw}")
+        state, rest = {}, []
+        for i, tok in enumerate(tokens[3:], 3):
+            key, eq, value = tok.partition('=')
+            if eq and key in ACCEPTED_KINDS[kind] and not rest:
+                state[key] = [] if value.lower() == 'none' else sorted(
+                    v for v in value.split(',') if v)
+            else:
+                rest = tokens[i:]
+                break
+        missing = [k for k in ACCEPTED_KINDS[kind] if k not in state]
+        if missing:
+            raise ValueError(f"accepted file line {n}: missing {missing}: {raw}")
+        entries.append({'year': year, 'date': date_key, 'kind': kind, 'state': state,
+                        'reason': ' '.join(rest), 'line': line})
+    return entries
+
+
+def _accepted_match(entries, kind, date_key, state):
+    """First accepted entry whose kind, date and every state key match."""
+    for e in entries:
+        if e['kind'] != kind or e['date'] != date_key:
+            continue
+        if all(e['state'].get(k) == v for k, v in state.items()):
+            return e
+    return None
+
+
 def compare_systems(gig_db, avail_matrix, master_cal=None,
                     matrix_backups=None, cal_backups=None, output=None,
-                    gig_secondary=None):
+                    gig_secondary=None, matrix_columns=None, accepted=None):
     """
     Compare all systems and generate discrepancy report.
 
@@ -421,7 +485,18 @@ def compare_systems(gig_db, avail_matrix, master_cal=None,
             from the gig db. Applied explain-not-demand: a DJ2 person is added to
             the gig-db set for a date only when the matrix also lists them that
             date. Absent from the matrix = roadie -> ignored (no false flag).
+        matrix_columns: set of names that have a column in this year's matrix, or
+            None. A calendar backup who has no column (Alan Do, a roadie who
+            backs up in emergencies) can never be marked BACKUP in the matrix,
+            so those entries are listed under the backup section instead of
+            counted as mismatches. Unknown "?XX" codes are still compared.
+        accepted: list from parse_accepted(), already filtered to this year, or
+            None. A discrepancy whose exact state matches an entry is listed
+            under ACCEPTED and left out of the counts; entries that match
+            nothing are reported so the file can be cleaned up.
     """
+    accepted = accepted or []
+    accepted_hits = []   # (entry, kind, date, state)
     gig_secondary = gig_secondary or {}
     out = output or sys.stdout
 
@@ -504,15 +579,21 @@ def compare_systems(gig_db, avail_matrix, master_cal=None,
             }
             if has_calendar:
                 issue['master_cal'] = cal_djs
-            issues.append(issue)
+            state = {'gigdb': gig_djs, 'matrix': matrix_djs}
+            if has_calendar:
+                state['cal'] = cal_djs
+            hit = _accepted_match(accepted, 'booking', date_key, state)
+            if hit:
+                accepted_hits.append((hit, 'booking', date_key, state))
+            else:
+                issues.append(issue)
 
-    # Status
+    # Status. No early return: the backup comparison below must still run
+    # (it used to be skipped on a clean booking week, hiding backup drift).
     if not issues:
         write("STATUS: ALL SYSTEMS IN SYNC")
-        write("=" * 70)
-        return
-
-    write(f"STATUS: {len(issues)} DISCREPANCY(IES) FOUND")
+    else:
+        write(f"STATUS: {len(issues)} DISCREPANCY(IES) FOUND")
     write("=" * 70)
     write()
 
@@ -594,12 +675,24 @@ def compare_systems(gig_db, avail_matrix, master_cal=None,
     # BACKUP DJ COMPARISON (Matrix vs Calendar only)
     # =====================================================================
     backup_issues = []
+    no_column = []   # (date, [names]) calendar backups with no matrix column
     if matrix_backups is not None and cal_backups is not None:
         all_backup_dates = set(matrix_backups.keys()) | set(cal_backups.keys())
         for date_key in sorted(all_backup_dates, key=date_sort_key):
             m_backups = sorted(set(matrix_backups.get(date_key, [])))
             c_backups = sorted(set(cal_backups.get(date_key, [])))
+            if matrix_columns is not None:
+                skipped = [b for b in c_backups
+                           if b not in matrix_columns and not b.startswith('?')]
+                if skipped:
+                    no_column.append((date_key, skipped))
+                    c_backups = [b for b in c_backups if b not in skipped]
             if m_backups != c_backups:
+                state = {'matrix': m_backups, 'cal': c_backups}
+                hit = _accepted_match(accepted, 'backup', date_key, state)
+                if hit:
+                    accepted_hits.append((hit, 'backup', date_key, state))
+                    continue
                 backup_issues.append({
                     'date': date_key,
                     'matrix': m_backups,
@@ -620,9 +713,34 @@ def compare_systems(gig_db, avail_matrix, master_cal=None,
             write("BACKUP DJs: Matrix and Calendar are in sync")
             write()
 
+        if no_column:
+            write("Calendar backups with no Matrix column (not compared):")
+            for date_key, names in no_column:
+                write(f"  {date_key:>8}  {', '.join(names)}")
+            write()
+
+    if accepted_hits:
+        write(f"ACCEPTED ({len(accepted_hits)} items, not counted; from the accepted file)")
+        write("-" * 70)
+        for entry, kind, date_key, state in accepted_hits:
+            shown = "  ".join(f"{k}={','.join(v) if v else 'none'}" for k, v in state.items())
+            write(f"  {date_key:>8}  {kind:<8} {shown}")
+            write(f"           {entry['reason']}")
+        write()
+    stale = [e for e in accepted if not any(h[0] is e for h in accepted_hits)]
+    if stale:
+        write("Accepted lines that no longer match anything (remove from the file):")
+        for e in stale:
+            write(f"  {e['line']}")
+        write()
+
     write("=" * 70)
     total_issues = len(issues) + len(backup_issues)
-    write(f"SUMMARY: {len(issues)} booking discrepancy(ies), {len(backup_issues)} backup discrepancy(ies)")
+    summary = (f"SUMMARY: {len(issues)} booking discrepancy(ies), "
+               f"{len(backup_issues)} backup discrepancy(ies)")
+    if accepted:
+        summary += f", {len(accepted_hits)} accepted"
+    write(summary)
     systems = "Gig DB + Matrix"
     if has_calendar:
         systems += " + Calendar"
@@ -645,8 +763,16 @@ def main():
     parser.add_argument("--no-calendar", action="store_true",
                         help="Skip master calendar comparison")
     parser.add_argument("--output", "-o", help="Save report to file (default: print to console)")
+    parser.add_argument("--accepted", metavar="FILE",
+                        help="Hand-written list of discrepancies to list but not count "
+                             "(see parse_accepted for the format)")
 
     args = parser.parse_args()
+
+    accepted = None
+    if args.accepted:
+        with open(args.accepted) as f:
+            accepted = [e for e in parse_accepted(f.read()) if e['year'] == int(args.year)]
 
     print(f"\nBOOKING COMPARATOR — {args.year}")
     print("=" * 50)
@@ -698,14 +824,20 @@ def main():
         today = datetime.now().strftime("%m-%d-%Y")
         args.output = f"{today} - Systems crosscheck.txt"
 
+    # Names with a column in this year's matrix (Date/TBA/AAG are not people)
+    columns = COLUMN_MAPS.get(int(args.year))
+    matrix_columns = set(columns) - {"Date", "TBA", "AAG"} if columns else None
+
     # Always print to console AND save to file
     compare_systems(gig_db, avail_matrix, master_cal,
-                    matrix_backups, cal_backups, gig_secondary=gig_secondary)
+                    matrix_backups, cal_backups, gig_secondary=gig_secondary,
+                    matrix_columns=matrix_columns, accepted=accepted)
 
     with open(args.output, 'w') as f:
         compare_systems(gig_db, avail_matrix, master_cal,
                         matrix_backups, cal_backups, output=f,
-                        gig_secondary=gig_secondary)
+                        gig_secondary=gig_secondary, matrix_columns=matrix_columns,
+                        accepted=accepted)
     print(f"\nReport saved to: {args.output}")
 
 

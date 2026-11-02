@@ -125,5 +125,155 @@ class TestFetchMasterCalendarFailure(unittest.TestCase):
         self.assertEqual(bookings, {"9/24": ["Paul"]})
 
 
+class TestCalendarInitialsMap(unittest.TestCase):
+    """The bracket map the calendar leg uses is built from dj_core's DJ_INITIALS."""
+
+    def test_djs_resolve(self):
+        m = booking_comparator.calendar_initials_map()
+        self.assertEqual(m["[PB]"], "Paul")
+        self.assertNotIn("[UP]", m)
+
+    def test_alan_do_is_a_known_backup(self):
+        """Alan Do roadies and backs up in emergencies (Paul, 2026-11-02); [AD] is not a typo."""
+        m = booking_comparator.calendar_initials_map()
+        self.assertEqual(m["[AD]"], "Alan")
+        from dj_core import DJ_FULL_NAMES
+        self.assertEqual(DJ_FULL_NAMES["AD"], "Alan Do")
+
+
+class TestBackupCompareSkipsPeopleWithoutMatrixColumn(unittest.TestCase):
+    """A backup who has no Availability Matrix column (Alan) can never be marked
+    BACKUP in the Matrix, so comparing his calendar entry against the Matrix
+    would mismatch every run. Such entries are reported, not counted."""
+
+    MATRIX_DJS = {"Henry", "Woody", "Paul", "Stefano", "Felipe"}
+
+    def report(self, matrix_backups, cal_backups, matrix_columns, bookings=None):
+        import io
+        out = io.StringIO()
+        b = bookings or {}
+        booking_comparator.compare_systems(b, b, b, matrix_backups, cal_backups,
+                                           output=out, matrix_columns=matrix_columns)
+        return out.getvalue()
+
+    def test_filter_survives_the_booking_loop(self):
+        """Regression: compare_systems has a per-date local that shadowed the
+        parameter, so with any bookings present every DJ was 'skipped'."""
+        text = self.report({"9/5": ["Henry"]}, {"9/5": ["Alan", "Henry"]}, self.MATRIX_DJS,
+                           bookings={"9/5": ["Paul"], "9/12": ["Woody"]})
+        self.assertIn("0 backup discrepancy", text)
+        self.assertIn("9/5  Alan", text)
+
+    def test_calendar_only_alan_is_not_a_mismatch(self):
+        text = self.report({}, {"9/5": ["Alan"]}, self.MATRIX_DJS)
+        self.assertIn("0 backup discrepancy", text)
+        self.assertIn("Alan", text)
+        self.assertIn("no Matrix column", text)
+
+    def test_without_matrix_djs_behaviour_is_unchanged(self):
+        text = self.report({}, {"9/5": ["Alan"]}, None)
+        self.assertIn("1 backup discrepancy", text)
+
+    def test_real_dj_on_same_date_still_compared(self):
+        text = self.report({}, {"9/5": ["Alan", "Henry"]}, self.MATRIX_DJS)
+        self.assertIn("1 backup discrepancy", text)
+        self.assertIn("Cal:     Henry", text)
+
+    def test_backup_drift_reported_when_bookings_are_in_sync(self):
+        """Regression: a clean booking week used to return before the backup
+        section, so backup mismatches were never printed."""
+        text = self.report({"9/5": ["Woody"]}, {}, self.MATRIX_DJS)
+        self.assertIn("ALL SYSTEMS IN SYNC", text)
+        self.assertIn("1 backup discrepancy", text)
+        self.assertIn("Matrix:  Woody", text)
+
+    def test_unknown_code_is_still_a_mismatch(self):
+        """A typo'd bracket must keep surfacing; only known names are skipped."""
+        text = self.report({}, {"9/5": ["?HKK"]}, self.MATRIX_DJS)
+        self.assertIn("1 backup discrepancy", text)
+
+
+ACCEPTED_TEXT = """\
+# year  date  kind     state...                       reason
+2026 3/7   backup  matrix=none         cal=Paul,Henry    past date, leave it (Paul 11-02)
+2026 9/6   backup  matrix=Woody        cal=none          past date (Paul 11-02)
+
+2027 2/27  booking gigdb=Henry matrix=none cal=none     penciled in (Paul 7-27)
+"""
+
+
+class TestParseAccepted(unittest.TestCase):
+    """Hand-written accepted-items file: one line per known discrepancy that
+    Paul has decided to leave alone. A line pins the exact state, so a date
+    that changes shape is flagged again."""
+
+    def test_lines_parse_with_reason(self):
+        entries = booking_comparator.parse_accepted(ACCEPTED_TEXT)
+        self.assertEqual(len(entries), 3)
+        e = entries[0]
+        self.assertEqual((e["year"], e["date"], e["kind"]), (2026, "3/7", "backup"))
+        self.assertEqual(e["state"], {"matrix": [], "cal": ["Henry", "Paul"]})
+        self.assertEqual(e["reason"], "past date, leave it (Paul 11-02)")
+
+    def test_booking_line_carries_three_systems(self):
+        e = booking_comparator.parse_accepted(ACCEPTED_TEXT)[2]
+        self.assertEqual(e["kind"], "booking")
+        self.assertEqual(e["state"], {"gigdb": ["Henry"], "matrix": [], "cal": []})
+
+    def test_bad_line_names_its_number(self):
+        with self.assertRaises(ValueError) as cm:
+            booking_comparator.parse_accepted("2026 3/7 backup matrix=none cal=none ok\nnonsense line\n")
+        self.assertIn("line 2", str(cm.exception))
+
+    def test_unknown_kind_rejected(self):
+        with self.assertRaises(ValueError):
+            booking_comparator.parse_accepted("2026 3/7 helper matrix=none cal=none x\n")
+
+
+class TestAcceptedItemsInReport(unittest.TestCase):
+
+    def report(self, gig_db, matrix, cal, matrix_backups, cal_backups, accepted):
+        import io
+        out = io.StringIO()
+        booking_comparator.compare_systems(gig_db, matrix, cal, matrix_backups, cal_backups,
+                                           output=out, accepted=accepted)
+        return out.getvalue()
+
+    def accepted(self):
+        return [e for e in booking_comparator.parse_accepted(ACCEPTED_TEXT)]
+
+    def test_accepted_backup_is_listed_not_counted(self):
+        text = self.report({}, {}, {}, {}, {"3/7": ["Henry", "Paul"]}, self.accepted())
+        self.assertIn("0 backup discrepancy", text)
+        self.assertIn("ACCEPTED", text)
+        self.assertIn("past date, leave it (Paul 11-02)", text)
+        self.assertIn("1 accepted", text)
+
+    def test_accepted_booking_is_listed_not_counted(self):
+        text = self.report({"2/27": ["Henry"]}, {}, {}, {}, {}, self.accepted())
+        self.assertIn("ALL SYSTEMS IN SYNC", text)
+        self.assertIn("0 booking discrepancy", text)
+        self.assertIn("penciled in (Paul 7-27)", text)
+
+    def test_changed_state_is_flagged_again(self):
+        """3/7 is accepted as Matrix none / Cal Henry+Paul. Matrix now says Woody."""
+        text = self.report({}, {}, {}, {"3/7": ["Woody"]}, {"3/7": ["Henry", "Paul"]},
+                           self.accepted())
+        self.assertIn("1 backup discrepancy", text)
+        self.assertIn("Matrix:  Woody", text)
+
+    def test_stale_lines_are_reported(self):
+        """Nothing wrong on 9/6 any more: say so, so the line gets removed."""
+        text = self.report({}, {}, {}, {}, {"3/7": ["Henry", "Paul"]}, self.accepted())
+        self.assertIn("no longer match", text)
+        self.assertIn("9/6", text.split("no longer match", 1)[1])
+        self.assertIn("2/27", text.split("no longer match", 1)[1])
+
+    def test_no_accepted_file_changes_nothing(self):
+        text = self.report({}, {}, {}, {}, {"3/7": ["Henry", "Paul"]}, None)
+        self.assertIn("1 backup discrepancy", text)
+        self.assertNotIn("ACCEPTED", text)
+
+
 if __name__ == '__main__':
     unittest.main()
