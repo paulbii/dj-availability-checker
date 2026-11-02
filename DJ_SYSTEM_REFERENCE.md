@@ -183,9 +183,9 @@ Counts how many times each DJ is assigned as BACKUP in the availability matrix f
 ### Booking Comparator
 
 **File:** `booking_comparator.py`
-**Launch:** `python3 booking_comparator.py --year 2026 [--no-calendar] [--output report.txt]`
+**Launch:** `python3 booking_comparator.py --year 2026 [--no-calendar] [--output report.txt] [--accepted accepted.txt]`
 
-Cross-checks three systems (Gig Database, Availability Matrix, Master Calendar) to identify discrepancies. Uses icalBuddy for macOS calendar access. Outputs a text report file.
+Cross-checks three systems (Gig Database, Availability Matrix, Master Calendar) to identify discrepancies. Reads the calendar over CalDAV (`calendar_read.py`). Outputs a text report file. `--accepted` names a hand-written list of discrepancies to list but not count (format in the file header and in `parse_accepted`; Paul's copy lives at `~/EA/loops/systems-crosscheck/accepted.txt`). Calendar backups by people with no Matrix column (Alan Do, `[AD]`) are listed, not compared.
 
 ### Confirmation Forwarder
 
@@ -300,6 +300,7 @@ So the one path is: edit, `git add` by name, `./release.sh "message"`. It runs t
 | Stefano Enforcer | `/Users/paulburchfield/bin/dj-checker-button stefano_maxed_enforcer.scpt` |
 | Nestldown Roster | `/Users/paulburchfield/bin/dj-checker-button run_nestldown_roster.scpt` |
 | Potential Availability | `/Users/paulburchfield/bin/dj-checker-button potential_availability.scpt` |
+| DJ Assignments page | `/Users/paulburchfield/bin/dj-checker-button publish_assignments_page.scpt` (rebuilds and uploads bigfundj.com/CLIENTS/assignments/2027/; the Python lives in `~/EA/projects/dj-capacity-2027`) |
 
 **Why a launcher (2026-09-19).** This repo is under `~/Documents`, which iCloud evicts, sometimes within minutes. Stream Deck starts processes with iCloud downloading turned off, so an evicted file fails instead of downloading: `script error -36` for a `.scpt`, `[Errno 11] Resource deadlock avoided` for a `.py`. `~/bin/dj-checker-button` sits outside iCloud, turns downloading on, then runs `osascript <script>`; everything it spawns inherits the setting. Running a `.scpt` straight from Stream Deck (Run AppleScript, or `osascript ...` as a shell command) skips that and will fail whenever the file has gone cold. From Terminal, plain `osascript <script>` is fine.
 
