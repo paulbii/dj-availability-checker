@@ -2,7 +2,7 @@
 """
 Potential-inquiry availability triage.
 
-Reads every thread in the IMAP folder INBOX.BIG FUN.Sales.Potential (Paul's
+Reads every thread in the IMAP folder BIG FUN/Sales/Potential (Paul's
 love2tap account), pulls the event date and venue out of each subject line,
 checks that date against the DJ availability matrix, and prints + saves a
 sorted report of where we stand on each potential inquiry.
@@ -20,7 +20,6 @@ Usage:
 
 import os
 import re
-import json
 import imaplib
 import datetime
 from email.header import decode_header, make_header
@@ -33,13 +32,13 @@ from dj_core import (
     get_columns_for_year,
     get_column_indices,
     get_gig_database_bookings,
+    load_imap_credentials,
 )
 
 colorama_init(autoreset=True)
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-IMAP_CREDENTIALS_PATH = os.path.join(SCRIPT_DIR, "imap_credentials.json")
-POTENTIAL_FOLDER = "INBOX.BIG FUN.Sales.Potential"
+POTENTIAL_FOLDER = "BIG FUN/Sales/Potential"  # love2tap on Fastmail: '/' delimiter, beside INBOX
 DOWNLOADS_DIR = os.path.expanduser("~/Downloads")
 SUPPORTED_YEARS = {"2025", "2026", "2027"}
 
@@ -62,9 +61,10 @@ def clean_subject(raw):
 
 def fetch_subjects():
     """Return list of subject strings from the Potential folder (read-only)."""
-    with open(IMAP_CREDENTIALS_PATH) as f:
-        creds = json.load(f)
-    imap = imaplib.IMAP4_SSL(creds["host"], creds.get("port", 993))
+    creds = load_imap_credentials()
+    if creds is None:
+        raise SystemExit("No IMAP password in Keychain (bigfun-imap / paul). See ~/EA/references/secrets-management.md.")
+    imap = imaplib.IMAP4_SSL(creds["host"], creds["port"])
     imap.login(creds["username"], creds["password"])
     try:
         imap.select(f'"{POTENTIAL_FOLDER}"', readonly=True)

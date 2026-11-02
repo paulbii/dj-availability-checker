@@ -43,7 +43,10 @@ from dj_core import (
     DJ_INITIALS,
     DJ_EMAILS,
     DJ_NAME_MAP,
+    IMAP_KEYCHAIN_ACCOUNT,
+    IMAP_KEYCHAIN_SERVICE,
     PAID_BACKUP_DJS,
+    load_imap_credentials,
     UNPAID_BACKUP_DJS,
     COLUMN_MAPS,
     BACKUP_ELIGIBLE_DJS,
@@ -168,11 +171,9 @@ DEFAULT_CREDENTIALS_PATH = os.path.join(
     "dj-availability-checker", "your-credentials.json"
 )
 
-# IMAP credentials for email folder creation (Paul's personal account)
-IMAP_CREDENTIALS_PATH = os.path.join(
-    os.path.expanduser("~"), "Documents", "projects",
-    "dj-availability-checker", "imap_credentials.json"
-)
+# Booking email folders live under this top-level mailbox on the love2tap
+# account (a sibling of INBOX on Fastmail): BIG FUN/<year>/<MM-DD-YY: names>.
+EMAIL_FOLDER_ROOT = "BIG FUN"
 
 # Formula templates for auto-creating new date rows
 # Column letters map to formulas. {row} will be replaced with actual row number.
@@ -1126,72 +1127,102 @@ def open_booking_log_form(booking):
 # EMAIL FOLDER CREATION (Paul only)
 # =============================================================================
 
+def email_folder_name(booking):
+    """'MM-DD-YY: first name and first name', plus ' (planner)' when there is one."""
+    name = f"{booking['date'].strftime('%m-%d-%y')}: {booking['client_display']}"
+    if booking.get("has_planner"):
+        name += " (planner)"
+    return name
+
+
+_LIST_DELIM_RE = re.compile(r'^\((?:[^)]*)\)\s+"([^"]*)"\s')
+
+
+def parse_list_delimiter(list_line):
+    """
+    Hierarchy delimiter from one IMAP LIST reply line, or None if it can't be
+    read. Fastmail: (\\HasNoChildren) "/" INBOX (name unquoted). Bluehost:
+    (\\HasNoChildren) "." "INBOX". A NIL delimiter (flat namespace) is None.
+    """
+    if not list_line:
+        return None
+    line = list_line.decode() if isinstance(list_line, bytes) else list_line
+    m = _LIST_DELIM_RE.match(line)
+    return m.group(1) or None if m else None
+
+
+def folder_create_outcome(status, response):
+    """
+    'created', 'exists', or None from an IMAP CREATE reply. Fastmail answers
+    NO "Mailbox already exists"; Bluehost used the [ALREADYEXISTS] code.
+    """
+    if status == "OK":
+        return "created"
+    text = response[0] if response else b""
+    text = (text.decode(errors="replace") if isinstance(text, bytes) else (text or "")).upper()
+    if "ALREADYEXISTS" in text or "ALREADY EXISTS" in text:
+        return "exists"
+    return None
+
+
+def email_folder_path(year, folder_name, delimiter):
+    """Server path for the folder, using the delimiter the server reports."""
+    return f"{EMAIL_FOLDER_ROOT}{delimiter}{year}{delimiter}{folder_name}"
+
+
 def create_email_folder(booking, dry_run=False):
     """
-    Create an IMAP email folder for a booking when the DJ is Paul.
+    Create the booking's email folder on Paul's love2tap mailbox (Fastmail).
 
-    Folder path: BIG FUN/<year>/<MM-DD-YY: first name and first name (planner)>
-    IMAP uses '.' as the hierarchy delimiter on most Bluehost setups.
+    Path: BIG FUN/<year>/<MM-DD-YY: first name and first name (planner)>.
+    Returns the folder name on success (or if it already existed), None when
+    nothing was created; every failure is printed and swallowed, so callers
+    must read the return value rather than assume.
     """
-    # Build folder name: MM-DD-YY: client names (planner)
-    date_str = booking["date"].strftime("%m-%d-%y")
-    folder_name = f"{date_str}: {booking['client_display']}"
-    if booking["has_planner"]:
-        folder_name += " (planner)"
-
+    folder_name = email_folder_name(booking)
     year = str(booking["year"])
 
-    # Load IMAP credentials
-    if not os.path.exists(IMAP_CREDENTIALS_PATH):
-        print(f"  ⚠️  IMAP credentials not found at {IMAP_CREDENTIALS_PATH}")
-        print("  Skipping email folder creation.")
-        return None
-
-    with open(IMAP_CREDENTIALS_PATH, "r") as f:
-        creds = json.load(f)
-
-    if creds.get("host", "").startswith("mail.your"):
-        print("  ⚠️  IMAP credentials not configured (still using template values)")
+    creds = load_imap_credentials()
+    if creds is None:
+        print(f"  ⚠️  No IMAP password in Keychain ({IMAP_KEYCHAIN_SERVICE} / {IMAP_KEYCHAIN_ACCOUNT})")
         print("  Skipping email folder creation.")
         return None
 
     if dry_run:
-        print(f"  [DRY RUN] Would create email folder: BIG FUN/{year}/{folder_name}")
+        print(f"  [DRY RUN] Would create email folder: {EMAIL_FOLDER_ROOT}/{year}/{folder_name}")
         return folder_name
 
     try:
-        imap = imaplib.IMAP4_SSL(creds["host"], creds.get("port", 993))
+        imap = imaplib.IMAP4_SSL(creds["host"], creds["port"])
         imap.login(creds["username"], creds["password"])
 
-        # Detect hierarchy delimiter
+        # The server states its hierarchy delimiter in any LIST reply. Never
+        # guess it: a wrong one creates a top-level folder with a literal
+        # 'BIG FUN.2027.x' name instead of nesting (happened 2026-11-01).
         status, list_response = imap.list('""', 'INBOX')
-        delimiter = "."
-        if list_response and list_response[0]:
-            line = list_response[0].decode() if isinstance(list_response[0], bytes) else list_response[0]
-            # Format: (\\flags) "delimiter" "name"
-            parts = line.split('" "')
-            if len(parts) >= 2:
-                # Extract delimiter from between quotes
-                delim_part = parts[0]
-                d = delim_part.split('"')[-1] if '"' in delim_part else "."
-                if d:
-                    delimiter = d
+        delimiter = parse_list_delimiter(list_response[0] if list_response else None)
+        if not delimiter:
+            print(f"  ⚠️  Could not read the server's folder delimiter from {list_response!r}")
+            print("  Skipping email folder creation.")
+            imap.logout()
+            return None
 
-        # Build full folder path with detected delimiter
-        # Bluehost nests all folders under INBOX
-        full_path = f"INBOX{delimiter}BIG FUN{delimiter}{year}{delimiter}{folder_name}"
+        full_path = email_folder_path(year, folder_name, delimiter)
 
         # Create the folder
         status, response = imap.create(f'"{full_path}"')
 
-        if status == "OK":
+        outcome = folder_create_outcome(status, response)
+        if outcome == "created":
             # Subscribe so it shows up in mail clients
             imap.subscribe(f'"{full_path}"')
-            print(f"  ✓ Created email folder: BIG FUN/{year}/{folder_name}")
-        elif b"ALREADYEXISTS" in (response[0] if response else b""):
-            print(f"  ✓ Email folder already exists: BIG FUN/{year}/{folder_name}")
+            print(f"  ✓ Created email folder: {full_path}")
+        elif outcome == "exists":
+            print(f"  ✓ Email folder already exists: {full_path}")
         else:
             print(f"  ⚠️  Folder creation returned: {status} {response}")
+            imap.logout()
+            return None
 
         imap.logout()
         return folder_name

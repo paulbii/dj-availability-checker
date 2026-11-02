@@ -1,0 +1,82 @@
+-- assign_dj.scpt
+--
+-- Entry point for Assign DJ: after Paul sets DJ1 on an existing booking in FileMaker, move it from TBA to the DJ in the matrix and calendar.
+-- Extracts booking data from the current FileMaker page in Safari,
+-- writes it to a temp JSON file, and calls the Python script.
+--
+-- Usage:
+--   Production:  osascript assign_dj.scpt
+--   Dry run:     osascript assign_dj.scpt --dry-run
+--
+-- Stream Deck / Keyboard Maestro:
+--   osascript osascript /Users/paulburchfield/Documents/projects/dj-availability-checker/assign_dj.scpt
+
+on run argv
+	-- Determine flags from command-line arguments
+	set extraFlags to ""
+	repeat with arg in argv
+		if arg as text is "--dry-run" then
+			set extraFlags to extraFlags & " --dry-run"
+		else if arg as text is "--test" then
+			set extraFlags to extraFlags & " --test"
+		end if
+	end repeat
+	
+	-- Extract booking data from Safari
+	tell application "Safari"
+		if (count of documents) is 0 then
+			display dialog "No Safari window is open." with title "Assign DJ" buttons {"OK"} with icon stop
+			return
+		end if
+		
+		set pageSource to do JavaScript "
+			JSON.stringify({
+				FMeventDate: typeof FMeventDate !== 'undefined' ? FMeventDate : '',
+				FMstartTime: typeof FMstartTime !== 'undefined' ? FMstartTime : '',
+				FMendTime: typeof FMendTime !== 'undefined' ? FMendTime : '',
+				FMclient: typeof FMclient !== 'undefined' ? FMclient : '',
+				FMvenue: typeof FMvenue !== 'undefined' ? FMvenue : '',
+				FMvenueAddress: typeof FMvenueAddress !== 'undefined' ? FMvenueAddress : '',
+				FMDJ1: typeof FMDJ1 !== 'undefined' ? FMDJ1 : '',
+				FMDJ2: typeof FMDJ2 !== 'undefined' ? FMDJ2 : '',
+				FMsound: typeof FMsound !== 'undefined' ? FMsound : '',
+				FMcersound: typeof FMcersound !== 'undefined' ? FMcersound : '',
+				MailCoordinator: typeof MailCoordinator !== 'undefined' ? MailCoordinator : '',
+				FMemail1: (function() { var el = document.editform ? document.editform['BookingContact1::IDEmail'] : null; return el ? el.value : ''; })(),
+				FMeventType: (function() { var el = document.editform ? document.editform['eventType'] : null; return el ? el.options[el.selectedIndex].text : ''; })()
+			})
+		" in document 1
+	end tell
+	
+	-- Validate we got data
+	if pageSource is "" or pageSource is missing value then
+		display dialog "Could not extract booking data from the current Safari page. Make sure a FileMaker booking record is open." with title "Assign DJ" buttons {"OK"} with icon stop
+		return
+	end if
+	
+	-- Write JSON to temp file
+	set jsonPath to "/tmp/gig_assign.json"
+	set fileRef to open for access POSIX file jsonPath with write permission
+	set eof of fileRef to 0
+	write pageSource to fileRef as «class utf8»
+	close access fileRef
+	
+	-- Path to Python script (same directory as this AppleScript)
+	set scriptDir to "/Users/paulburchfield/Documents/projects/dj-availability-checker"
+	set pythonScript to scriptDir & "/assign_dj.py"
+	
+	-- Run the Python script headless (no Terminal window).
+	-- The script surfaces its own results: a macOS notification on success
+	-- and native dialogs for conflicts/errors. Full output is logged for review.
+	set logPath to "/tmp/bigfun-assign-dj.log"
+	set shellCmd to "cd " & quoted form of scriptDir & " && /Users/paulburchfield/Documents/projects/dj-availability-checker/.venv/bin/python " & quoted form of pythonScript & " " & quoted form of jsonPath & extraFlags & " > " & quoted form of logPath & " 2>&1"
+	try
+		do shell script shellCmd
+	on error
+		-- Non-zero exit. The Python script usually shows its own error dialog;
+		-- this is a fallback so a silent failure never goes unnoticed.
+		display notification "Assignment did not complete. See " & logPath with title "⚠️ Assign DJ"
+	end try
+end run
+
+

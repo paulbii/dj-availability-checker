@@ -99,6 +99,33 @@ After writing BOOKED to the matrix, the script checks if a backup is needed and 
 
 ---
 
+## 3b. Assign DJ
+
+Moves a booking that Paul has just assigned in FileMaker from TBA to the DJ in the other two systems. Built 2026-11-01 for the 2027 assignment round; `assign_dj.py` plus `tests/test_assign_dj.py` (33 tests).
+
+**Files:** `assign_dj.py`, `assign_dj.scpt` (source `assign_dj.applescript`)
+**Trigger:** Stream Deck button runs `dj-checker-button assign_dj.scpt` with the FileMaker record open in Safari
+**Flags:** `--dry-run` (validate against the live matrix and calendar, write nothing) | `--test` (real writes, calendar invite to paul@bigfundj.com) | `--credentials PATH`
+
+### Workflow
+
+1. **By hand in FileMaker first:** DJ1 set to the DJ, DJ2 cleared, a dated line in the notes, record saved. (Mirrors how a new booking is entered before Book Event.)
+2. Press the button. The AppleScript is the booking manager's with different paths: it writes `/tmp/gig_assign.json` and calls `assign_dj.py`, logging to `/tmp/bigfun-assign-dj.log`.
+3. **Validate:** DJ1 is set; the date row exists; the TBA cell holds a BOOKED; the Gigs calendar has a `[U?]` event whose title contains the client name (`[UP]`, `[UH]`, `[UW]`: U plus the booker's initial). The DJ's own cell must not hold `BACKUP` (alone or `DAD, BACKUP`): the date's backup is never rewritten to BOOKED by a script (Paul 2026-11-01); move the backup first. Both or neither: nothing is written unless both checks pass, and each failure names what it saw. A second press on a finished assignment is a no-op.
+4. **Matrix:** TBA steps down one (`BOOKED x 2` -> `BOOKED` -> blank, `AAG` kept). The DJ's cell becomes `BOOKED` whatever it held (an OK in anyone's cell is overwritten, Paul 2026-11-01), or `BOOKED x 2` if they already have one that day.
+5. **Calendar:** the bracket in the title becomes the DJ's initials, the rest of the title (Setup, planner) is untouched, and the DJ's BIG FUN address is added as an attendee, which sends the invite. The event is found and changed through Calendar.app by uid, the same AppleScript path Book Event uses, because CalDAV writes cannot carry attendees.
+6. **Backup:** Book Event skips its backup dialog for an unassigned booking, so a TBA event never had one. The same dialog runs here after the assignment: candidates from the year's backup-eligible list minus the DJ just assigned, filtered by the Book Event `can_backup` rules (Woody's bold-OUT check included); a date that already has a backup is reported, not changed. A pick gets the calendar conflict check, then `BACKUP` in the Matrix (`DAD` and the other default markers replaced, anything else kept with `, BACKUP` appended), then the all-day `[XX] BACKUP DJ` / `PAID BACKUP DJ` event with the invite (`--test` sends it to Paul). Skip, Cancel, a conflict, or an unreadable calendar leaves the assignment in place with no backup; if the Matrix write succeeds and the event fails, the dialog says to create the event by hand. A dry run lists the candidates and shows no dialog.
+
+7. **Paul only:** the booking email folder on love2tap, `BIG FUN/2027/MM-DD-YY: First and First (planner)`, through Book Event's `create_email_folder`. The log and the final dialog say whether it was created, already existed, or has to be made by hand; a folder failure never undoes the assignment.
+
+Not done here: the couple's reply and the DJ handoff email. A joint unassigned bracket (`[UP/SB]`) is refused, not guessed.
+
+### Sample
+
+`sample_bookings/sample_assign_dj.json` is a clean-format record for a dry run; change the date, DJ and client to a real unassigned booking.
+
+---
+
 ## 4. Cancel Booking
 
 Reverses a booking: clears the matrix, deletes calendar events, optionally removes backup, logs to Google Form.
@@ -172,9 +199,9 @@ After booking confirmation is sent to a couple, creates pre-filled forward draft
 **File:** `potential_availability.py`
 **Launch:** `python3 potential_availability.py`
 
-Read-only triage of open inquiries. Reads every thread in the IMAP folder `INBOX.BIG FUN.Sales.Potential` (love2tap), pulls the event date and venue from each subject line, checks each date against the availability matrix, and prints + saves a sorted report. Saves a markdown copy to `~/Downloads/YYYY-MM-DD-potential-availability.md`.
+Read-only triage of open inquiries. Reads every thread in the IMAP folder `BIG FUN/Sales/Potential` (love2tap, on Fastmail), pulls the event date and venue from each subject line, checks each date against the availability matrix, and prints + saves a sorted report. Saves a markdown copy to `~/Downloads/YYYY-MM-DD-potential-availability.md`.
 
-Subject parsing: primary format `(DOW MM-DD-YY Venue) ...` yields date + venue; a loose-date fallback (e.g. `8/7/2026`) catches corporate subjects with no venue; subjects with no parseable date are listed separately for manual check. Each resolved date reports spots open / FULL, DJs free to book, DJs free for backup, and booked/TBA/AAG counts. Dates not seeded in the matrix (matrix is seeded Fri-Mon, other dates added as needed) are flagged "not seeded in matrix." Loads each year's tab in a single API call. Uses `imap_credentials.json` (read-only) and `your-credentials.json`.
+Subject parsing: primary format `(DOW MM-DD-YY Venue) ...` yields date + venue; a loose-date fallback (e.g. `8/7/2026`) catches corporate subjects with no venue; subjects with no parseable date are listed separately for manual check. Each resolved date reports spots open / FULL, DJs free to book, DJs free for backup, and booked/TBA/AAG counts. Dates not seeded in the matrix (matrix is seeded Fri-Mon, other dates added as needed) are flagged "not seeded in matrix." Loads each year's tab in a single API call. Uses the Keychain IMAP app password (`bigfun-imap` / `paul`, IMAP-only access, read-only here) and `your-credentials.json`.
 
 ---
 
@@ -269,6 +296,7 @@ So the one path is: edit, `git add` by name, `./release.sh "message"`. It runs t
 |--------|---------|
 | Book Event | `/Users/paulburchfield/bin/dj-checker-button gig_booking_manager.scpt` |
 | Cancel Booking | `/Users/paulburchfield/bin/dj-checker-button cancel_booking.scpt` |
+| Assign DJ | `/Users/paulburchfield/bin/dj-checker-button assign_dj.scpt` |
 | Stefano Enforcer | `/Users/paulburchfield/bin/dj-checker-button stefano_maxed_enforcer.scpt` |
 | Nestldown Roster | `/Users/paulburchfield/bin/dj-checker-button run_nestldown_roster.scpt` |
 | Potential Availability | `/Users/paulburchfield/bin/dj-checker-button potential_availability.scpt` |
@@ -277,7 +305,7 @@ So the one path is: edit, `git add` by name, `./release.sh "message"`. It runs t
 
 **The venv is outside iCloud for the same reason**, at `~/.local/share/dj-availability-checker/venv`; `.venv` in the repo is a symlink to it, so every `.venv/bin/python` path still works. macOS never downloads an evicted binary on exec, so a venv inside iCloud cannot be made reliable. To rebuild: create the venv at that path, reinstall, keep the symlink.
 
-The Book Event and Cancel Booking AppleScripts accept `--dry-run` and `--test` flags as arguments.
+The Book Event, Cancel Booking and Assign DJ AppleScripts accept `--dry-run` and `--test` flags as arguments.
 
 ### Key File Paths
 
@@ -288,6 +316,7 @@ The Book Event and Cancel Booking AppleScripts accept `--dry-run` and `--test` f
 | Python binary | `/Users/paulburchfield/miniconda3/bin/python3` |
 | Venv | `~/.local/share/dj-availability-checker/venv` (repo `.venv` is a symlink) |
 | Temp booking JSON | `/tmp/gig_booking.json` |
+| Temp assignment JSON | `/tmp/gig_assign.json` (Assign DJ) |
 | Sample bookings | `sample_bookings/` directory (test JSON files) |
 
 ---
@@ -320,6 +349,8 @@ The Book Event and Cancel Booking AppleScripts accept `--dry-run` and `--test` f
 | gig_booking_manager.scpt | AppleScript trigger for booking manager |
 | **cancel_booking.py** | Booking cancellation (reverse of booking manager) |
 | cancel_booking.scpt | AppleScript trigger for cancellation |
+| **assign_dj.py** | Move a TBA booking to the DJ Paul set in FileMaker (matrix + calendar) |
+| assign_dj.scpt / assign_dj.applescript | AppleScript trigger for Assign DJ, and its source |
 | **backup_assigner.py** | Bulk backup DJ assignment with venue context |
 | backup_stats.py | Backup assignment counts per DJ per year |
 | **booking_comparator.py** | Cross-system discrepancy checker |

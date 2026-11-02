@@ -174,6 +174,36 @@ DJ_FULL_NAMES = {
 }
 
 # Backup payment categories
+# =============================================================================
+# IMAP (Paul's love2tap mailbox, hosted on Fastmail)
+# =============================================================================
+# Used by the booking email folder (gig_booking_manager, assign_dj) and the
+# Potential-folder triage (potential_availability). Host and login are not
+# secrets; the app password lives in Keychain as bigfun-imap / paul
+# (see ~/EA/references/secrets-management.md). mail.love2tap.com stopped
+# serving IMAP in autumn 2026 (it now resolves to a Fastmail redirect host),
+# which is why the host is Fastmail's directly.
+IMAP_HOST = "imap.fastmail.com"
+IMAP_PORT = 993
+IMAP_USERNAME = "paul@love2tap.com"
+IMAP_KEYCHAIN_SERVICE = "bigfun-imap"
+IMAP_KEYCHAIN_ACCOUNT = "paul"
+
+
+def load_imap_credentials(get_password=None):
+    """
+    {host, port, username, password} for Paul's mailbox, or None when the
+    Keychain entry is missing or empty. get_password is injectable for tests.
+    """
+    if get_password is None:
+        import keyring
+        get_password = lambda: keyring.get_password(IMAP_KEYCHAIN_SERVICE, IMAP_KEYCHAIN_ACCOUNT)
+    password = get_password()
+    if not password:
+        return None
+    return {"host": IMAP_HOST, "port": IMAP_PORT, "username": IMAP_USERNAME, "password": password}
+
+
 PAID_BACKUP_DJS = {"Stefano", "Felipe", "Stephanie"}
 UNPAID_BACKUP_DJS = {"Henry", "Woody", "Paul"}
 
