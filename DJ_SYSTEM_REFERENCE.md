@@ -134,6 +134,8 @@ Reverses a booking: clears the matrix, deletes calendar events, optionally remov
 **Trigger:** Stream Deck button runs `dj-checker-button cancel_booking.scpt` (see Stream Deck Buttons)
 **Flags:** `--dry-run` | `--test` | `--credentials PATH`
 
+**Calendar.app may be closed.** All three buttons edit the calendar through `calendar_app.py`, which launches Calendar.app hidden and waits for it to load. Nothing to do before pressing a button.
+
 ### 5-Step Process
 
 1. Parse booking data (same JSON format as gig_booking_manager)
@@ -156,6 +158,8 @@ When clearing a BOOKED cell, the script restores the DJ's default value based on
 ### Inquiry Tracker Convention
 
 For cancellations, set the Inquiry Date and Decision Date to the same value (today). This mirrors the convention used when a date is full at initial contact — no decision period to track. The distinction is clear from the Resolution field: Full vs. Canceled.
+
+A cancellation is therefore two rows on the same (Event Date, Venue) key: the original Booked row and a later Canceled row. Readers pair them with `dj_core.net_tracker_rows()`: each Canceled row timestamped after the earliest Booked row cancels one Booked row (newest Booked rows kept, so a re-booking after a cancel still stands); when every booking is cancelled the newest Canceled row stands. `get_venue_inquiries_for_date()` and the 2027 assignment script (`~/EA/projects/dj-capacity-2027/assign_2027.py`) read the tracker through it; the dashboard's `dedupe_inquiries()` applies the same rule in pandas. Added 2026-11-03.
 
 ---
 
@@ -232,6 +236,7 @@ Shared business logic imported by all other scripts. Single source of truth for 
 | `get_gig_database_bookings()` | FileMaker single-day query |
 | `get_gig_database_bookings_multiday()` | FileMaker ±3 days query |
 | `get_venue_inquiries_for_date()` | All inquiry history for a date |
+| `net_tracker_rows()` | Pairs a Booked row with its later Canceled row (see Inquiry Tracker Convention) |
 | `get_full_inquiries_for_date()` | Turned-away (Full) inquiries with recency tiers |
 | `get_nearby_bookings_for_dj()` | DJ's bookings within ±3 days |
 | `auto_clear_stale_cache()` | Clears gig DB cache after 60 minutes |
@@ -350,6 +355,9 @@ The Book Event, Cancel Booking and Assign DJ AppleScripts accept `--dry-run` and
 | gig_booking_manager.scpt | AppleScript trigger for booking manager |
 | **cancel_booking.py** | Booking cancellation (reverse of booking manager) |
 | cancel_booking.scpt | AppleScript trigger for cancellation |
+| calendar_read.py | CalDAV reads: day listings as (uid, title) |
+| **calendar_app.py** | Calendar.app writes for the buttons: launch guard, delete / retitle / create by `event id` |
+| test_calendar_app.py | Tests for calendar_app |
 | **assign_dj.py** | Move a TBA booking to the DJ Paul set in FileMaker (matrix + calendar) |
 | assign_dj.scpt / assign_dj.applescript | AppleScript trigger for Assign DJ, and its source |
 | **backup_assigner.py** | Bulk backup DJ assignment with venue context |

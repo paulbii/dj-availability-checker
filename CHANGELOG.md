@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 <!-- Features in development go here -->
 
 ### Fixed
+- **Buttons pressed with Calendar.app closed.** Cancel Booking, Assign DJ and Book Event's
+  hold delete edit the Gigs calendar by `event id`. With Calendar.app closed, the script's
+  `tell application "Calendar"` launched it and the lookup ran before the CalDAV store had
+  loaded: `Can't get event id … (-1728)` on an event that resolved fine two minutes later
+  (Cancel Booking, Netta and Gawesha 6/17/27, 2026-11-03; the matrix was cleared, the calendar
+  was not). All three buttons now go through `calendar_app.CalendarApp`, which launches
+  Calendar.app hidden first and retries an event-id miss while the store loads, only when it
+  did the launching. One osascript per event, one timeout, one error type. A failed hold delete
+  in Book Event now shows a dialog instead of a log line. The warning dialog waits 30 minutes
+  and never raises: its 60s timeout had ended the same cancellation before the backup event
+  and the booking log form. (2026-11-03)
 - **AM/PM guess for events ending 12:00-2:00.** The Gig DB has no AM/PM. An end of exactly
   12:00 was always read as midnight (a 9-12 morning became 9 PM), and an end past midnight was
   read as crossing noon (5:30-1:00 became 5:30 AM). Now, inside that window, a start of 8:00 or
