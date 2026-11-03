@@ -1469,3 +1469,26 @@ class TestCreateCalendarEvents(unittest.TestCase):
         with self.assertRaises(RuntimeError) as cm:
             gig_booking_manager.create_allday_backup_event(datetime(2027, 6, 17), "Henry", app=app)
         self.assertIn("boom", str(cm.exception))
+
+
+class TestShowWarningDialog(unittest.TestCase):
+    """2026-11-03: the dialog's 60s timeout raised and ended a cancellation
+    before the backup event, the turned-away check and the booking log form."""
+
+    @mock.patch("gig_booking_manager.subprocess.run")
+    def test_expiry_is_swallowed_and_printed(self, mock_run):
+        import io, contextlib
+        import gig_booking_manager
+        import subprocess as sp
+        mock_run.side_effect = sp.TimeoutExpired(cmd="osascript", timeout=1800)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            gig_booking_manager.show_warning_dialog("Cancel Booking — Calendar:\n\nCould not delete")
+        self.assertIn("expired", out.getvalue().lower())
+        self.assertIn("Cancel Booking — Calendar:", out.getvalue())
+
+    @mock.patch("gig_booking_manager.subprocess.run")
+    def test_waits_long_enough_to_step_away(self, mock_run):
+        import gig_booking_manager
+        gig_booking_manager.show_warning_dialog("x")
+        self.assertEqual(mock_run.call_args.kwargs.get("timeout"), 1800)

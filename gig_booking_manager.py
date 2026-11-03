@@ -892,13 +892,25 @@ def delete_hold_calendar_event(date_obj, initials_bracket, fetch_day=calendar_re
 # DIALOG OPERATIONS (via AppleScript)
 # =============================================================================
 
+WARNING_DIALOG_TIMEOUT = 1800   # same as the backup dialogs: Paul may have stepped away
+
+
 def show_warning_dialog(message):
-    """Show a warning dialog and halt. Returns when user clicks OK."""
+    """
+    Show a warning dialog and wait for OK. Never raises: an unanswered dialog
+    is printed and the script carries on, so the steps after it still run.
+    2026-11-03: a 60s timeout here raised and ended a cancellation before the
+    backup event, the turned-away check and the booking log form.
+    """
     msg_esc = message.replace('"', '\\"')
     script = f'''
     display dialog "{msg_esc}" with title "⚠️ Booking Manager Warning" buttons {{"OK"}} default button "OK" with icon caution
     '''
-    subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=60)
+    try:
+        subprocess.run(["osascript", "-e", script], capture_output=True, text=True,
+                       timeout=WARNING_DIALOG_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        print(f"  WARNING: Warning dialog expired unacknowledged: {message.splitlines()[0]}")
 
 
 def show_multiple_booking_dialog(dj_name, date_display, existing_count, existing_events):
