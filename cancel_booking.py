@@ -35,6 +35,7 @@ from dj_core import (
 )
 
 import calendar_read
+from calendar_app import CalendarApp, CalendarAppError
 from gig_booking_manager import (
     CALENDAR_NAME,
     BOOKING_LOG_FORM_URL,
@@ -57,49 +58,24 @@ from gig_booking_manager import (
 # ── Calendar deletion ────────────────────────────────────────────────────────
 #
 # The day's events are read over CalDAV (under a second) and the matching ones
-# deleted in Calendar.app by `event id`, a direct lookup. The earlier
-# whose-clause scan walked the entire Gigs calendar: 30s was not enough, and on
-# 2026-07-29 the delete timed out and was misreported as "no events found."
-# The timeout stays generous; the id lookup takes well under a second.
-CALENDAR_TIMEOUT = 180
+# deleted in Calendar.app by `event id` through calendar_app.CalendarApp, which
+# also launches Calendar.app when it is closed and waits for it to load. The
+# earlier whose-clause scan walked the entire Gigs calendar: 30s was not
+# enough, and on 2026-07-29 the delete timed out and was misreported as "no
+# events found." On 2026-11-03 a bare `event id` lookup raced a cold launch.
 
 
-def _run_calendar_delete(script):
+def _delete(uids, app):
     """
-    Run a deletion AppleScript that speaks the result protocol:
-        DELETED:<n>          — n events deleted
-        NONE                 — nothing matched at all
-        FOUND:<t1>||<t2>...  — candidates found, none deleted
-
-    Returns (status, payload):
-        ("deleted", n) | ("not_found", 0) | ("ambiguous", [titles]) | ("error", msg)
-    A timeout or osascript failure is ALWAYS ("error", ...) — never "not_found".
+    Delete the uids and speak the result protocol:
+        ("deleted", n) | ("error", msg)
+    A Calendar.app failure is ALWAYS ("error", ...) — never "not_found".
     """
+    app = app or CalendarApp()
     try:
-        result = subprocess.run(
-            ["osascript", "-e", script],
-            capture_output=True, text=True, timeout=CALENDAR_TIMEOUT,
-        )
-    except subprocess.TimeoutExpired:
-        return ("error", f"Calendar query timed out after {CALENDAR_TIMEOUT}s")
-    except Exception as e:
+        return ("deleted", app.delete_events(uids))
+    except CalendarAppError as e:
         return ("error", str(e))
-
-    if result.returncode != 0:
-        return ("error", result.stderr.strip() or f"osascript exit {result.returncode}")
-
-    out = result.stdout.strip()
-    if out.startswith("DELETED:"):
-        count = out[len("DELETED:"):]
-        if count.isdigit():
-            return ("deleted", int(count))
-        return ("error", f"unparseable count in {out!r}")
-    if out == "NONE":
-        return ("not_found", 0)
-    if out.startswith("FOUND:"):
-        titles = [t for t in out[len("FOUND:"):].split("||") if t]
-        return ("ambiguous", titles)
-    return ("error", f"unexpected osascript output: {out!r}")
 
 
 def acceptable_event_titles(booking):
@@ -123,21 +99,8 @@ def acceptable_event_titles(booking):
     return titles
 
 
-def _delete_by_id_script(uids):
-    """AppleScript that deletes each event by id and reports DELETED:<n>."""
-    deletes = "\n".join(f'            delete (event id "{u}")' for u in uids)
-    return f'''
-    tell application "Calendar"
-        tell calendar "{CALENDAR_NAME}"
-{deletes}
-            return "DELETED:{len(uids)}"
-        end tell
-    end tell
-    '''
-
-
 def delete_booking_calendar_event(date_obj, initials_bracket, expected_titles,
-                                  fetch_day=calendar_read.fetch_day_events):
+                                  fetch_day=calendar_read.fetch_day_events, app=None):
     """
     Delete the booking calendar event for a DJ on a given date.
 
@@ -148,8 +111,8 @@ def delete_booking_calendar_event(date_obj, initials_bracket, expected_titles,
     BACKUP DJ / Hold to DJ events are excluded from that report; they are
     never deletion candidates here.
 
-    Returns (status, payload) per _run_calendar_delete. A failed CalDAV read
-    is ("error", ...), never "not_found".
+    Returns (status, payload) per _delete, plus ("not_found", 0) and
+    ("ambiguous", titles). A failed CalDAV read is ("error", ...), never "not_found".
     """
     try:
         listing = fetch_day(CALENDAR_NAME, date_obj.date())
@@ -169,18 +132,18 @@ def delete_booking_calendar_event(date_obj, initials_bracket, expected_titles,
             others.append(title)
 
     if exact:
-        return _run_calendar_delete(_delete_by_id_script(exact))
+        return _delete(exact, app)
     if others:
         return ("ambiguous", others)
     return ("not_found", 0)
 
 
-def delete_backup_calendar_event(date_obj, backup_dj, fetch_day=calendar_read.fetch_day_events):
+def delete_backup_calendar_event(date_obj, backup_dj, fetch_day=calendar_read.fetch_day_events, app=None):
     """
     Delete the backup DJ's all-day calendar event on a given date.
 
     Backup titles are formulaic ('BACKUP DJ' + initials), so a contains match
-    on both is enough. Returns (status, payload) per _run_calendar_delete.
+    on both is enough. Returns (status, payload) per _delete, or ("not_found", 0).
     """
     try:
         listing = fetch_day(CALENDAR_NAME, date_obj.date())
@@ -192,7 +155,7 @@ def delete_backup_calendar_event(date_obj, backup_dj, fetch_day=calendar_read.fe
             if "backup dj" in title.lower() and backup_initials in title.lower()]
     if not uids:
         return ("not_found", 0)
-    return _run_calendar_delete(_delete_by_id_script(uids))
+    return _delete(uids, app)
 
 
 # ── Backup DJ detection ──────────────────────────────────────────────────────
@@ -494,6 +457,7 @@ class BookingCanceller:
         expected_titles = acceptable_event_titles(booking)
         expected_title = expected_titles[0]
         calendar_failed = False
+        app = None if self.dry_run else CalendarApp()
 
         if self.dry_run:
             shown = " or ".join(f'"{t}"' for t in expected_titles)
@@ -503,7 +467,7 @@ class BookingCanceller:
                 print(f"  [DRY RUN] Would consider deleting backup event for {backup_dj}")
         else:
             status, payload = delete_booking_calendar_event(
-                date_obj, initials_bracket, expected_titles)
+                date_obj, initials_bracket, expected_titles, app=app)
 
             if status == "deleted":
                 print(f"  ✓ Deleted {payload} calendar event(s): \"{expected_title}\"")
@@ -539,7 +503,7 @@ class BookingCanceller:
                 )
 
             if remove_backup and backup_dj:
-                b_status, b_payload = delete_backup_calendar_event(date_obj, backup_dj)
+                b_status, b_payload = delete_backup_calendar_event(date_obj, backup_dj, app=app)
                 if b_status == "deleted":
                     print(f"  ✓ Deleted backup event for {backup_dj}")
                     self.log(f"Calendar: deleted backup event for {backup_dj}")
