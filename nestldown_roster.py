@@ -166,11 +166,6 @@ def generate_html(roster):
     """
     today = datetime.date.today()
 
-    # Group by year, then month
-    by_year_month = defaultdict(lambda: defaultdict(list))
-    for entry in roster:
-        by_year_month[entry["date"].year][entry["date"].month].append(entry)
-
     def render_row(entry):
         date_str = entry["date"].strftime("%a, %B %-d")
         row_class = ""
@@ -188,15 +183,19 @@ def generate_html(roster):
               <td>{entry['email']}</td>
             </tr>"""
 
-    sections = []
-    years = sorted(by_year_month.keys())
-    for year in years:
-        months = sorted(by_year_month[year].keys())
-        month_sections = []
-        for month in months:
-            month_name = cal_module.month_name[month]
-            rows = "\n".join(render_row(e) for e in by_year_month[year][month])
-            month_sections.append(f"""
+    def render_sections(entries):
+        """Render a list of entries as year sections, each holding month tables."""
+        by_year_month = defaultdict(lambda: defaultdict(list))
+        for entry in entries:
+            by_year_month[entry["date"].year][entry["date"].month].append(entry)
+
+        sections = []
+        for year in sorted(by_year_month.keys()):
+            month_sections = []
+            for month in sorted(by_year_month[year].keys()):
+                month_name = cal_module.month_name[month]
+                rows = "\n".join(render_row(e) for e in by_year_month[year][month])
+                month_sections.append(f"""
         <div class="month-section">
           <h3>{month_name} {year}</h3>
           <table>
@@ -215,18 +214,36 @@ def generate_html(roster):
           </table>
         </div>""")
 
-        sections.append(f"""
+            sections.append(f"""
       <div class="year-section">
         <h2>{year}</h2>
         {"".join(month_sections)}
       </div>""")
+        return "".join(sections)
+
+    # Past events keep their data but sit in a collapsed block above the upcoming
+    # events, so date order stays ascending and the next event is still on screen.
+    upcoming = [e for e in roster if e["date"] >= today]
+    past = [e for e in roster if e["date"] < today]
 
     updated = datetime.datetime.now(TIMEZONE).strftime("%B %-d, %Y at %-I:%M %p %Z")
 
     if not roster:
         body_content = '<p class="no-events">No Nestldown events found for this period.</p>'
     else:
-        body_content = "".join(sections)
+        body_content = ""
+        if past:
+            body_content += f"""
+      <details class="past-events">
+        <summary>Past events ({len(past)})</summary>
+        {render_sections(past)}
+      </details>"""
+        if upcoming:
+            body_content += f"""
+      <p class="upcoming-label">Upcoming events ({len(upcoming)})</p>
+      {render_sections(upcoming)}"""
+        else:
+            body_content += '<p class="no-events">No upcoming Nestldown events.</p>'
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -332,6 +349,36 @@ def generate_html(roster):
     tr.unassigned td:nth-child(3) {{
       font-style: italic;
       color: #a08050;
+    }}
+
+    details.past-events {{
+      margin-top: 0.5rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid #d4c9b8;
+    }}
+
+    details.past-events summary {{
+      cursor: pointer;
+      font-family: 'Libre Baskerville', serif;
+      font-size: 1.1rem;
+      color: #6b6158;
+      padding: 0.5rem 0;
+    }}
+
+    details.past-events summary:hover {{
+      color: #dd00aa;
+    }}
+
+    .upcoming-label {{
+      font-family: 'Libre Baskerville', serif;
+      font-size: 1.1rem;
+      color: #6b6158;
+      padding: 0.5rem 0;
+      margin-top: 1rem;
+    }}
+
+    .upcoming-label + .year-section h2 {{
+      margin-top: 1.25rem;
     }}
 
     .no-events {{
