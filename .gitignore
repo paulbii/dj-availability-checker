@@ -52,3 +52,6 @@ scratch/
 
 # === Edit backups (osacompile pre-edit snapshots) ===
 *.prebak-*
+
+# Retired Automator launchers kept locally for reference (6.6 MB of .app bundles)
+archive/automator-apps/
