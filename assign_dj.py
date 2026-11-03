@@ -45,10 +45,10 @@ Usage:
 import argparse
 import os
 import re
-import subprocess
 import sys
 
 import calendar_read
+from calendar_app import CalendarApp
 from dj_core import BACKUP_ELIGIBLE_DJS, COLUMN_MAPS, DJ_EMAILS, get_dj_initials
 from gig_booking_manager import (
     CALENDAR_NAME,
@@ -187,40 +187,19 @@ def find_assigned_event(listing, bracket, client_display):
 
 
 # =============================================================================
-# CALENDAR (read over CalDAV; edit via AppleScript, the only path that carries
-# attendees). The event is found by uid over CalDAV in under a second and then
-# addressed in Calendar.app with `event id`, a direct lookup. A `whose` clause
-# walks the whole Gigs calendar: 30s for a day listing, and `first event whose
-# uid is` ran 1m54s and then failed on a valid uid (measured 2026-11-02).
+# CALENDAR: read over CalDAV, edit in Calendar.app by `event id` through
+# calendar_app.CalendarApp (the only path that carries attendees; it also
+# launches Calendar.app when closed). A `whose` clause walks the whole Gigs
+# calendar: 30s for a day listing, and `first event whose uid is` ran 1m54s and
+# then failed on a valid uid (measured 2026-11-02).
 # =============================================================================
-
-def modify_script(uid, new_title, invitee_email):
-    title_esc = new_title.replace('"', '\\"')
-    return f'''
-    tell application "Calendar"
-        tell calendar "{CALENDAR_NAME}"
-            set ev to event id "{uid}"
-            set summary of ev to "{title_esc}"
-            tell ev
-                make new attendee at end of attendees with properties {{email:"{invitee_email}"}}
-            end tell
-        end tell
-    end tell
-    '''
-
-
-def run_osascript(script):
-    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=60)
-    if result.returncode != 0:
-        raise RuntimeError(f"AppleScript failed: {result.stderr.strip()}")
-    return result.stdout
 
 
 # =============================================================================
 # THE FLOW
 # =============================================================================
 
-def assign(booking, sheets, osa=run_osascript, fetch_day=calendar_read.fetch_day_events,
+def assign(booking, sheets, app=None, fetch_day=calendar_read.fetch_day_events,
            dry_run=False, test_mode=False,
            log=print, warn=None, notify=None,
            choose_backup=show_backup_dialog, conflicts=check_calendar_conflicts,
@@ -323,8 +302,9 @@ def assign(booking, sheets, osa=run_osascript, fetch_day=calendar_read.fetch_day
     log(f"Matrix: TBA -> '{new_tba}', {dj} -> '{new_cell}'")
 
     # ---- Phase 3: calendar --------------------------------------------------
+    app = app or CalendarApp()
     try:
-        osa(modify_script(uid, new_title, invitee))
+        app.retitle_and_invite(uid, new_title, invitee)
     except Exception as e:
         return halt(f"Matrix is updated but the calendar change failed:\n\n{e}\n\n"
                     f"Retitle '{old_title}' to '{new_title}' and invite {invitee} by hand, "
