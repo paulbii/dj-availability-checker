@@ -1342,9 +1342,32 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class FakeCalendarApp:
+    """Stands in for calendar_app.CalendarApp; records every edit."""
+
+    def __init__(self, fail=None):
+        self.deleted = []
+        self.created = []
+        self.fail = fail
+
+    def delete_events(self, uids):
+        if self.fail:
+            from calendar_app import CalendarAppError
+            raise CalendarAppError(self.fail)
+        self.deleted.extend(uids)
+        return len(uids)
+
+    def create_event(self, title, start, end, location="", allday=False, invitee_email=None):
+        if self.fail:
+            from calendar_app import CalendarAppError
+            raise CalendarAppError(self.fail)
+        self.created.append(dict(title=title, start=start, end=end, location=location,
+                                 allday=allday, invitee_email=invitee_email))
+
+
 class TestDeleteHoldCalendarEvent(unittest.TestCase):
     """RESERVED -> BOOKED removes the 'Hold to DJ' event: found over CalDAV,
-    deleted in Calendar.app by id. No whose-clause scan."""
+    deleted in Calendar.app by id through CalendarApp."""
 
     DATE = datetime(2026, 9, 26)
 
@@ -1352,33 +1375,97 @@ class TestDeleteHoldCalendarEvent(unittest.TestCase):
     def listing_of(*pairs):
         return lambda calendar_name, day: list(pairs)
 
-    @mock.patch("gig_booking_manager.subprocess.run")
-    def test_hold_found_is_deleted_by_id(self, mock_run):
+    def test_hold_found_is_deleted_by_id(self):
         import gig_booking_manager
-        mock_run.return_value = mock.Mock(stdout="1", returncode=0, stderr="")
+        app = FakeCalendarApp()
         deleted = gig_booking_manager.delete_hold_calendar_event(
             self.DATE, "[PB]",
-            fetch_day=self.listing_of(("u7", "[PB] Hold to DJ"), ("u1", "[PB] Chen and Lee")))
+            fetch_day=self.listing_of(("u7", "[PB] Hold to DJ"), ("u1", "[PB] Chen and Lee")), app=app)
         self.assertTrue(deleted)
-        script = mock_run.call_args.args[0][2]
-        self.assertIn('event id "u7"', script)
-        self.assertNotIn('"u1"', script)
-        self.assertNotIn("whose", script)
+        self.assertEqual(app.deleted, ["u7"])
 
-    @mock.patch("gig_booking_manager.subprocess.run")
-    def test_no_hold_touches_calendar_app_not_at_all(self, mock_run):
+    def test_no_hold_touches_calendar_app_not_at_all(self):
         import gig_booking_manager
+        app = FakeCalendarApp()
         deleted = gig_booking_manager.delete_hold_calendar_event(
-            self.DATE, "[PB]", fetch_day=self.listing_of(("u8", "[HK] Hold to DJ")))
+            self.DATE, "[PB]", fetch_day=self.listing_of(("u8", "[HK] Hold to DJ")), app=app)
         self.assertFalse(deleted)
-        mock_run.assert_not_called()
+        self.assertEqual(app.deleted, [])
 
-    @mock.patch("gig_booking_manager.subprocess.run")
-    def test_caldav_failure_is_false_and_writes_nothing(self, mock_run):
+    def test_caldav_failure_is_false_and_writes_nothing(self):
         import gig_booking_manager
         from calendar_read import CalendarReadError
+        app = FakeCalendarApp()
         def broken(calendar_name, day):
             raise CalendarReadError("server down")
-        deleted = gig_booking_manager.delete_hold_calendar_event(self.DATE, "[PB]", fetch_day=broken)
+        deleted = gig_booking_manager.delete_hold_calendar_event(self.DATE, "[PB]", fetch_day=broken, app=app)
         self.assertFalse(deleted)
-        mock_run.assert_not_called()
+        self.assertEqual(app.deleted, [])
+
+    def test_calendar_app_failure_raises_instead_of_reading_as_no_hold(self):
+        # Before 2026-11-03 this returned False and the booking carried on with
+        # the hold still on the calendar and one log line nobody reads.
+        import gig_booking_manager
+        from calendar_app import CalendarAppError
+        app = FakeCalendarApp(fail="Calendar.app did not answer within 60s")
+        with self.assertRaises(CalendarAppError):
+            gig_booking_manager.delete_hold_calendar_event(
+                self.DATE, "[PB]", fetch_day=self.listing_of(("u7", "[PB] Hold to DJ")), app=app)
+
+
+class TestCreateCalendarEvents(unittest.TestCase):
+    """The two create functions build title, location and invitee and hand them
+    to CalendarApp.create_event; the AppleScript itself is calendar_app's job."""
+
+    def booking(self, dj="Woody"):
+        initials = {"Woody": "WM", "Paul": "PB", "Unassigned": "UP"}[dj]
+        return {
+            "client_display": "Netta and Gawesha", "dj_initials_bracket": f"[{initials}]",
+            "dj_short_name": dj, "has_planner": False, "event_type": "Wedding",
+            "sound_type": "Standard Speakers", "venue_name": "Nestldown",
+            "venue_street": "1 Nestldown Dr", "venue_city_state_zip": "Los Gatos, CA 95033",
+            "dj2_full_name": "", "date": datetime(2027, 6, 17),
+        }
+
+    def test_timed_event_carries_title_location_and_dj_invite(self):
+        import gig_booking_manager
+        app = FakeCalendarApp()
+        start, end = datetime(2027, 6, 17, 17, 0), datetime(2027, 6, 17, 22, 0)
+        title = gig_booking_manager.create_timed_calendar_event(self.booking("Woody"), start, end, app=app)
+        self.assertEqual(title, "[WM] Netta and Gawesha")
+        self.assertEqual(app.created, [dict(
+            title="[WM] Netta and Gawesha", start=start, end=end,
+            location="Nestldown, 1 Nestldown Dr, Los Gatos, CA 95033",
+            allday=False, invitee_email="woody@bigfundj.com")])
+
+    def test_test_mode_invites_paul(self):
+        import gig_booking_manager
+        app = FakeCalendarApp()
+        gig_booking_manager.create_timed_calendar_event(
+            self.booking("Woody"), datetime(2027, 6, 17, 17), datetime(2027, 6, 17, 22),
+            test_mode=True, app=app)
+        self.assertEqual(app.created[0]["invitee_email"], "paul@bigfundj.com")
+
+    def test_unassigned_booking_invites_nobody(self):
+        import gig_booking_manager
+        app = FakeCalendarApp()
+        gig_booking_manager.create_timed_calendar_event(
+            self.booking("Unassigned"), datetime(2027, 6, 17, 17), datetime(2027, 6, 17, 22), app=app)
+        self.assertIsNone(app.created[0]["invitee_email"])
+
+    def test_backup_event_is_allday_and_invites_the_backup(self):
+        import gig_booking_manager
+        app = FakeCalendarApp()
+        title = gig_booking_manager.create_allday_backup_event(datetime(2027, 6, 17), "Henry", app=app)
+        self.assertEqual(title, "[HK] BACKUP DJ")
+        self.assertEqual(app.created[0]["title"], "[HK] BACKUP DJ")
+        self.assertTrue(app.created[0]["allday"])
+        self.assertEqual(app.created[0]["invitee_email"], "henry@bigfundj.com")
+        self.assertEqual(app.created[0]["start"], datetime(2027, 6, 17))
+
+    def test_create_failure_raises_runtime_error_as_before(self):
+        import gig_booking_manager
+        app = FakeCalendarApp(fail="boom")
+        with self.assertRaises(RuntimeError) as cm:
+            gig_booking_manager.create_allday_backup_event(datetime(2027, 6, 17), "Henry", app=app)
+        self.assertIn("boom", str(cm.exception))

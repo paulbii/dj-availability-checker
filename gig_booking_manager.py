@@ -73,7 +73,7 @@ from dj_core import (
 # CONFIGURATION (local to booking manager)
 # =============================================================================
 
-CALENDAR_NAME = "Gigs"
+from calendar_app import CALENDAR_NAME, CalendarApp, CalendarAppError  # CALENDAR_NAME re-exported for the other buttons
 
 # Google Form for booking log
 BOOKING_LOG_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLScNrxG2zvtJ-3BAh72xUkN_UinzRC66n1j3zACGqsC_62Do7w/viewform"
@@ -823,12 +823,10 @@ def check_calendar_conflicts(date_obj, initials_bracket):
     return conflicts
 
 
-def create_timed_calendar_event(booking, cal_start, cal_end, test_mode=False):
-    """Create the primary timed calendar event via AppleScript."""
-    # Build title: [INITIALS] ClientName [Setup] (planner)
+def create_timed_calendar_event(booking, cal_start, cal_end, test_mode=False, app=None):
+    """Create the primary timed calendar event. Returns the title. Raises RuntimeError on failure."""
     title = primary_event_title(booking)
 
-    # Build location
     location_parts = [booking["venue_name"]]
     if booking["venue_street"]:
         location_parts.append(booking["venue_street"])
@@ -836,97 +834,43 @@ def create_timed_calendar_event(booking, cal_start, cal_end, test_mode=False):
         location_parts.append(booking["venue_city_state_zip"])
     location = ", ".join(location_parts)
 
-    # Format times for AppleScript
-    start_str = cal_start.strftime("%B %d, %Y %I:%M:%S %p")
-    end_str = cal_end.strftime("%B %d, %Y %I:%M:%S %p")
-
-    # Determine invitee
     dj_short = booking["dj_short_name"]
     if dj_short in DJ_EMAILS and dj_short not in ("Unassigned", "Unknown"):
-        if test_mode:
-            invitee_email = "paul@bigfundj.com"
-        else:
-            invitee_email = DJ_EMAILS[dj_short]
+        invitee_email = "paul@bigfundj.com" if test_mode else DJ_EMAILS[dj_short]
     else:
         invitee_email = None
 
-    # Escape strings for AppleScript
-    title_esc = title.replace('"', '\\"')
-    location_esc = location.replace('"', '\\"')
-
-    # Build AppleScript
-    invitee_block = ""
-    if invitee_email:
-        invitee_block = f'''
-            tell newEvent
-                make new attendee at end of attendees with properties {{email:"{invitee_email}"}}
-            end tell'''
-
-    script = f'''
-    tell application "Calendar"
-        tell calendar "{CALENDAR_NAME}"
-            set newEvent to make new event with properties {{summary:"{title_esc}", location:"{location_esc}", start date:date "{start_str}", end date:date "{end_str}"}}
-            {invitee_block}
-        end tell
-    end tell
-    '''
-
-    result = subprocess.run(
-        ["osascript", "-e", script],
-        capture_output=True, text=True, timeout=45,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"Calendar event creation failed: {result.stderr}")
-
+    app = app or CalendarApp()
+    try:
+        app.create_event(title, cal_start, cal_end, location=location, invitee_email=invitee_email)
+    except CalendarAppError as e:
+        raise RuntimeError(f"Calendar event creation failed: {e}")
     return title
 
 
-def create_allday_backup_event(date_obj, dj_name, test_mode=False):
-    """Create an all-day backup calendar event via AppleScript."""
+def create_allday_backup_event(date_obj, dj_name, test_mode=False, app=None):
+    """Create the all-day backup event. Returns the title. Raises RuntimeError on failure."""
     title = get_backup_title(dj_name)
-    date_str = date_obj.strftime("%B %d, %Y")
+    invitee_email = "paul@bigfundj.com" if test_mode else DJ_EMAILS.get(dj_name)
 
-    if test_mode:
-        invitee_email = "paul@bigfundj.com"
-    else:
-        invitee_email = DJ_EMAILS.get(dj_name)
-
-    title_esc = title.replace('"', '\\"')
-
-    invitee_block = ""
-    if invitee_email:
-        invitee_block = f'''
-            tell newEvent
-                make new attendee at end of attendees with properties {{email:"{invitee_email}"}}
-            end tell'''
-
-    script = f'''
-    tell application "Calendar"
-        tell calendar "{CALENDAR_NAME}"
-            set newEvent to make new event with properties {{summary:"{title_esc}", start date:date "{date_str} 12:00:00 AM", end date:date "{date_str} 11:59:00 PM", allday event:true}}
-            {invitee_block}
-        end tell
-    end tell
-    '''
-
-    result = subprocess.run(
-        ["osascript", "-e", script],
-        capture_output=True, text=True, timeout=45,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"Backup event creation failed: {result.stderr}")
-
+    app = app or CalendarApp()
+    try:
+        app.create_event(title, date_obj, None, allday=True, invitee_email=invitee_email)
+    except CalendarAppError as e:
+        raise RuntimeError(f"Backup event creation failed: {e}")
     return title
 
 
-def delete_hold_calendar_event(date_obj, initials_bracket, fetch_day=calendar_read.fetch_day_events):
+def delete_hold_calendar_event(date_obj, initials_bracket, fetch_day=calendar_read.fetch_day_events, app=None):
     """
     Delete the 'Hold to DJ' calendar event for a DJ on a date.
     Called when converting a RESERVED status to BOOKED.
 
     The day's events are read over CalDAV and the hold deleted in Calendar.app
-    by `event id` (a whole-calendar `whose` scan took 30s+).
-    Returns True if an event was deleted, False otherwise.
+    by `event id` through CalendarApp (a whole-calendar `whose` scan took 30s+).
+    Returns True if a hold was deleted, False if there was none to delete or the
+    calendar could not be read. Raises CalendarAppError if Calendar.app failed:
+    the caller must tell Paul, because the hold is still on the calendar.
     """
     try:
         listing = fetch_day(CALENDAR_NAME, date_obj.date())
@@ -940,26 +884,8 @@ def delete_hold_calendar_event(date_obj, initials_bracket, fetch_day=calendar_re
     if not uids:
         return False
 
-    deletes = "\n".join(f'            delete (event id "{u}")' for u in uids)
-    script = f'''
-    tell application "Calendar"
-        tell calendar "{CALENDAR_NAME}"
-{deletes}
-            return "{len(uids)}"
-        end tell
-    end tell
-    '''
-
-    try:
-        result = subprocess.run(
-            ["osascript", "-e", script],
-            capture_output=True, text=True, timeout=30,
-        )
-        count = result.stdout.strip()
-        return count != "0" and count != ""
-    except (subprocess.TimeoutExpired, Exception) as e:
-        print(f"  WARNING: Could not delete hold event: {e}")
-        return False
+    app = app or CalendarApp()
+    return app.delete_events(uids) > 0
 
 
 # =============================================================================
@@ -1588,14 +1514,25 @@ class GigBookingManager:
                     if self.dry_run:
                         print(f"  [DRY RUN] Would delete Hold to DJ event for {booking['dj_initials_bracket']}")
                     else:
-                        deleted = delete_hold_calendar_event(
-                            booking["date"], booking["dj_initials_bracket"]
-                        )
-                        if deleted:
-                            self.log(f"Calendar: deleted Hold to DJ event for {dj_short}")
-                            print(f"  ✓ Deleted Hold to DJ calendar event")
+                        try:
+                            deleted = delete_hold_calendar_event(
+                                booking["date"], booking["dj_initials_bracket"]
+                            )
+                        except CalendarAppError as e:
+                            print(f"  ⚠️  HOLD EVENT NOT DELETED — {e}")
+                            self.log(f"⚠️ HOLD EVENT NOT DELETED ({e}) — "
+                                     f"delete the Hold to DJ event for {dj_short} by hand")
+                            show_warning_dialog(
+                                f"Booking Manager — Calendar:\n\n"
+                                f"The Hold to DJ event for {dj_short} could not be deleted:\n{e}\n\n"
+                                f"The booking continues. Delete the hold in Calendar by hand."
+                            )
                         else:
-                            print(f"  ℹ️  No Hold to DJ event found to delete")
+                            if deleted:
+                                self.log(f"Calendar: deleted Hold to DJ event for {dj_short}")
+                                print(f"  ✓ Deleted Hold to DJ calendar event")
+                            else:
+                                print(f"  ℹ️  No Hold to DJ event found to delete")
         else:
             tba_col = col_map["TBA"]
             current_tba = row_data.get("TBA", "")
