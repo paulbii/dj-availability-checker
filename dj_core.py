@@ -1436,6 +1436,69 @@ def get_venue_cautions():
             if v and not v.startswith("#")]
 
 
+def _parse_tracker_timestamp(value):
+    """Inquiry Tracker form Timestamp ('11/3/2026 9:41:13') -> datetime, or None."""
+    value = str(value or "").strip()
+    for fmt in ("%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M", "%m/%d/%Y"):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def net_tracker_rows(rows):
+    """
+    Collapse Inquiry Tracker rows to the ones that still stand, per event.
+
+    A booking and its cancellation are two form rows on the same
+    (Event Date, Venue) key: a Booked row, then a Canceled row entered later
+    (Paul logs the cancel date in both Inquiry Date and Decision Date on that
+    row, so matching dates on a Canceled row mark a cancelled prior booking).
+    Same rule as the dashboard's dedupe_inquiries:
+
+    - each Canceled row timestamped after the earliest Booked row cancels one
+      Booked row (newest Booked rows kept, so a re-booking after a cancel stands)
+    - every booking cancelled: the newest Canceled row stands
+    - no Booked row at all: the newest row stands
+
+    Args:
+        rows: dicts as returned by worksheet.get_all_records() (keys
+            'Timestamp', 'Event Date', 'Venue (if known)', 'Resolution').
+
+    Returns:
+        dict: (event date as written, venue lower-cased and stripped) ->
+        list of the standing rows, newest first.
+    """
+    groups = {}
+    for row in rows:
+        key = (str(row.get("Event Date", "")).strip(),
+               str(row.get("Venue (if known)", "")).strip().lower())
+        groups.setdefault(key, []).append(row)
+
+    def ts(row):
+        return _parse_tracker_timestamp(row.get("Timestamp")) or datetime.min
+
+    out = {}
+    for key, group in groups.items():
+        group = sorted(group, key=ts, reverse=True)
+        booked = [r for r in group if str(r.get("Resolution", "")).strip().lower() == "booked"]
+        canceled = [r for r in group if str(r.get("Resolution", "")).strip().lower() == "canceled"]
+        if not booked:
+            out[key] = group[:1]
+            continue
+        earliest_booking = min(ts(r) for r in booked)
+        cancels = sum(1 for r in canceled
+                      if _parse_tracker_timestamp(r.get("Timestamp")) is not None
+                      and ts(r) > earliest_booking)
+        net = max(0, len(booked) - cancels)
+        if net == 0:
+            out[key] = canceled[:1] if canceled else group[:1]
+        else:
+            out[key] = booked[:net]
+    return out
+
+
 def get_venue_inquiries_for_date(event_date_str, client, year=None):
     """
     Get venue inquiry information for a specific date
@@ -1472,76 +1535,42 @@ def get_venue_inquiries_for_date(event_date_str, client, year=None):
         target_month = int(month_day_parts[0])
         target_day = int(month_day_parts[1])
         
-        # Group by venue and keep most recent decision date
-        venue_data = {}  # venue -> (resolution, decision_date)
-        
+        # Every row for this date (with a venue), then net bookings against
+        # their cancellations so a Booked row and its later Canceled row read
+        # as one cancelled event (net_tracker_rows).
+        matching = []
         for row in all_data:
-            event_date = row.get('Event Date', '').strip()
+            event_date = str(row.get('Event Date', '')).strip()
             if not event_date:
                 continue
-            
-            try:
-                # Parse the event date from the sheet
-                # Try multiple formats
-                parsed_event = None
-                for fmt in ["%m/%d/%Y", "%-m/%-d/%Y", "%m/%d/%y", "%-m/%-d/%y"]:
-                    try:
-                        parsed_event = datetime.strptime(event_date, fmt)
-                        break
-                    except ValueError:
-                        continue
-                
-                if not parsed_event:
+            parsed_event = None
+            for fmt in ["%m/%d/%Y", "%m/%d/%y"]:
+                try:
+                    parsed_event = datetime.strptime(event_date, fmt)
+                    break
+                except ValueError:
                     continue
-                
-                # Skip rows from a different year when a year is specified.
-                if year is not None and parsed_event.year != year:
-                    continue
-
-                # Check if this row matches our target date (month and day only)
-                if (parsed_event.month, parsed_event.day) == (target_month, target_day):
-                    venue = row.get('Venue (if known)', '').strip()
-                    resolution = row.get('Resolution', '').strip()
-                    decision_date_str = row.get('Decision Date', '').strip()
-                    
-                    # Skip if no venue
-                    if not venue:
-                        continue
-                    
-                    # Parse decision date
-                    decision_date = None
-                    for fmt in ["%m/%d/%Y", "%-m/%-d/%Y", "%m/%d/%y", "%-m/%-d/%y"]:
-                        try:
-                            decision_date = datetime.strptime(decision_date_str, fmt)
-                            break
-                        except ValueError:
-                            continue
-                    
-                    if not decision_date:
-                        decision_date = datetime.min
-                    
-                    # Check if we should use this entry
-                    if venue not in venue_data:
-                        venue_data[venue] = (resolution, decision_date)
-                    else:
-                        # Keep the one with more recent decision date
-                        existing_resolution, existing_date = venue_data[venue]
-                        if decision_date > existing_date:
-                            venue_data[venue] = (resolution, decision_date)
-            
-            except (ValueError, AttributeError):
+            if not parsed_event:
                 continue
-        
-        # Organize results
-        booked_venues = []
-        not_booked_venues = []
-        
-        for venue, (resolution, _) in venue_data.items():
+            if year is not None and parsed_event.year != year:
+                continue
+            if (parsed_event.month, parsed_event.day) != (target_month, target_day):
+                continue
+            if not str(row.get('Venue (if known)', '')).strip():
+                continue
+            matching.append(row)
+
+        booked_venues = set()
+        not_booked_venues = set()
+        for standing in net_tracker_rows(matching).values():
+            row = standing[0]
+            venue = str(row.get('Venue (if known)', '')).strip()
+            resolution = str(row.get('Resolution', '')).strip()
             if resolution == "Booked":
-                booked_venues.append(venue)
+                booked_venues.add(venue)
             else:
-                not_booked_venues.append(f"{venue} ({resolution})")
-        
+                not_booked_venues.add(f"{venue} ({resolution})")
+
         return {
             'booked': sorted(booked_venues),
             'not_booked': sorted(not_booked_venues)
