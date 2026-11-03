@@ -105,3 +105,45 @@ class CalendarApp:
                 self._sleep(RETRY_INTERVAL)
                 continue
             raise CalendarAppError(err)
+
+    # -- the edits the buttons need ------------------------------------------
+
+    def delete_events(self, uids):
+        """Delete each uid in its own osascript. Returns how many were deleted.
+        Raises on the first failure; the ones before it are gone."""
+        count = 0
+        for uid in uids:
+            self.run_script(f'        delete (event id "{esc(uid)}")')
+            count += 1
+        return count
+
+    def retitle_and_invite(self, uid, title, invitee_email):
+        self.run_script(
+            f'        set ev to event id "{esc(uid)}"\n'
+            f'        set summary of ev to "{esc(title)}"\n'
+            f'        tell ev\n'
+            f'            make new attendee at end of attendees with properties {{email:"{esc(invitee_email)}"}}\n'
+            f'        end tell'
+        )
+
+    def create_event(self, title, start, end, location="", allday=False, invitee_email=None):
+        """`start`/`end` are datetimes. An all-day event covers the day of `start`; `end` is ignored."""
+        if allday:
+            day = start.strftime("%B %d, %Y")
+            when = (f'start date:date "{day} 12:00:00 AM", '
+                    f'end date:date "{day} 11:59:00 PM", allday event:true')
+        else:
+            when = (f'start date:date "{start.strftime("%B %d, %Y %I:%M:%S %p")}", '
+                    f'end date:date "{end.strftime("%B %d, %Y %I:%M:%S %p")}"')
+        props = f'summary:"{esc(title)}", '
+        if location:
+            props += f'location:"{esc(location)}", '
+        props += when
+        body = f'        set newEvent to make new event with properties {{{props}}}'
+        if invitee_email:
+            body += (
+                '\n        tell newEvent\n'
+                f'            make new attendee at end of attendees with properties {{email:"{esc(invitee_email)}"}}\n'
+                '        end tell'
+            )
+        self.run_script(body)

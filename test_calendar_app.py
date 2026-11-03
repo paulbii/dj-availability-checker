@@ -169,5 +169,79 @@ class TestEsc(unittest.TestCase):
         self.assertEqual(calendar_app.esc('Say "Hi" \\ now'), 'Say \\"Hi\\" \\\\ now')
 
 
+class TestDeleteEvents(unittest.TestCase):
+
+    def test_one_osascript_per_event_and_the_count_back(self):
+        run = FakeRun()
+        n = make_app(run).delete_events(["u1", "u2"])
+        self.assertEqual(n, 2)
+        self.assertEqual(len(run.scripts), 2)
+        self.assertIn('delete (event id "u1")', run.scripts[0])
+        self.assertNotIn('"u2"', run.scripts[0])
+        self.assertIn('delete (event id "u2")', run.scripts[1])
+
+    def test_empty_list_touches_nothing(self):
+        run = FakeRun()
+        self.assertEqual(make_app(run).delete_events([]), 0)
+        self.assertEqual(run.scripts, [])
+
+    def test_failure_on_the_second_event_raises_after_the_first_was_deleted(self):
+        run = FakeRun(replies=[OK, ("", 1, "boom")])
+        with self.assertRaises(CalendarAppError):
+            make_app(run).delete_events(["u1", "u2"])
+        self.assertEqual(len(run.scripts), 2)
+
+
+class TestRetitleAndInvite(unittest.TestCase):
+
+    def test_script_sets_summary_and_adds_the_attendee(self):
+        run = FakeRun()
+        make_app(run).retitle_and_invite("u1", "[HK] Cienna and Joseph", "henry@bigfundj.com")
+        self.assertEqual(len(run.scripts), 1)
+        s = run.scripts[0]
+        self.assertIn('set ev to event id "u1"', s)
+        self.assertIn('set summary of ev to "[HK] Cienna and Joseph"', s)
+        self.assertIn('make new attendee at end of attendees with properties {email:"henry@bigfundj.com"}', s)
+
+    def test_title_quotes_are_escaped(self):
+        run = FakeRun()
+        make_app(run).retitle_and_invite("u1", '[PB] The "Big" Day', "paul@bigfundj.com")
+        self.assertIn('set summary of ev to "[PB] The \\"Big\\" Day"', run.scripts[0])
+
+
+class TestCreateEvent(unittest.TestCase):
+
+    START = datetime(2027, 6, 17, 17, 0)
+    END = datetime(2027, 6, 17, 22, 0)
+
+    def test_timed_event_with_location_and_invitee(self):
+        run = FakeRun()
+        make_app(run).create_event("[WM] Netta and Gawesha", self.START, self.END,
+                                   location="Nestldown, 1 Nestldown Dr, Los Gatos, CA 95033",
+                                   invitee_email="woody@bigfundj.com")
+        s = run.scripts[0]
+        self.assertIn('make new event with properties {summary:"[WM] Netta and Gawesha", '
+                      'location:"Nestldown, 1 Nestldown Dr, Los Gatos, CA 95033", '
+                      'start date:date "June 17, 2027 05:00:00 PM", '
+                      'end date:date "June 17, 2027 10:00:00 PM"}', s)
+        self.assertIn('tell newEvent', s)
+        self.assertIn('{email:"woody@bigfundj.com"}', s)
+
+    def test_timed_event_without_invitee_has_no_attendee_block(self):
+        run = FakeRun()
+        make_app(run).create_event("[UP] Netta and Gawesha", self.START, self.END, location="Nestldown")
+        self.assertNotIn("attendee", run.scripts[0])
+
+    def test_allday_event(self):
+        run = FakeRun()
+        make_app(run).create_event("[HK] BACKUP DJ", self.START, None, allday=True,
+                                   invitee_email="henry@bigfundj.com")
+        s = run.scripts[0]
+        self.assertIn('{summary:"[HK] BACKUP DJ", start date:date "June 17, 2027 12:00:00 AM", '
+                      'end date:date "June 17, 2027 11:59:00 PM", allday event:true}', s)
+        self.assertNotIn("location", s)
+        self.assertIn('{email:"henry@bigfundj.com"}', s)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
