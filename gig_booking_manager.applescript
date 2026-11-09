@@ -61,6 +61,19 @@ on run argv
 	set eof of fileRef to 0
 	write pageSource to fileRef as «class utf8»
 	close access fileRef
+
+	-- The whole page too, for dj-prep's music link (the same read the DJ Prep
+	-- Music link button does). A failed read only skips the music step.
+	set fmHtmlPath to "/tmp/gig_booking_fm.html"
+	set fmHtmlFlag to ""
+	try
+		tell application "Safari" to set fmHTML to do JavaScript "document.documentElement.outerHTML" in document 1
+		set htmlRef to open for access POSIX file fmHtmlPath with write permission
+		set eof of htmlRef to 0
+		write fmHTML to htmlRef as «class utf8»
+		close access htmlRef
+		set fmHtmlFlag to " --fm-html " & quoted form of fmHtmlPath
+	end try
 	
 	-- Path to Python script (same directory as this AppleScript)
 	set scriptDir to "/Users/paulburchfield/Documents/projects/dj-availability-checker"
@@ -74,7 +87,7 @@ on run argv
 	-- the time went (tail -f the log). -u keeps Python unbuffered through the pipe;
 	-- pipefail keeps Python's exit status so the failure notification still fires.
 	do shell script "echo \"$(date +%T) Button pressed; Safari extraction took " & (round ((current date) - startedAt)) & "s; starting Python\" > " & quoted form of logPath
-	set shellCmd to "cd " & quoted form of scriptDir & " && set -o pipefail; /Users/paulburchfield/Documents/projects/dj-availability-checker/.venv/bin/python -u " & quoted form of pythonScript & " " & quoted form of jsonPath & extraFlags & " 2>&1 | while IFS= read -r line; do printf '%s %s\n' \"$(date +%T)\" \"$line\"; done >> " & quoted form of logPath
+	set shellCmd to "cd " & quoted form of scriptDir & " && set -o pipefail; /Users/paulburchfield/Documents/projects/dj-availability-checker/.venv/bin/python -u " & quoted form of pythonScript & " " & quoted form of jsonPath & extraFlags & fmHtmlFlag & " 2>&1 | while IFS= read -r line; do printf '%s %s\n' \"$(date +%T)\" \"$line\"; done >> " & quoted form of logPath
 	try
 		do shell script shellCmd
 	on error

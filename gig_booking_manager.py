@@ -1072,6 +1072,48 @@ def open_booking_log_form(booking):
 
 
 # =============================================================================
+# MUSIC LINK (Paul's weddings)
+# =============================================================================
+
+# dj-prep's launcher: logs to ~/Library/Logs/dj-prep/music.log and shows its own
+# dialog on failure, so a failed music step explains itself.
+DJ_PREP_RUNNER = "/Users/paulburchfield/Documents/projects/dj-prep/bin/dj-prep-run.sh"
+
+
+def wants_music_link(booking):
+    """Same gate as the nurture emails: Paul's couples, weddings (or blank type)."""
+    event_type = booking.get("event_type", "").strip().lower()
+    return booking["dj_short_name"] == "Paul" and event_type in ("", "wedding")
+
+
+def make_music_link(fm_html_path, dry_run=False, test_mode=False, run=subprocess.run):
+    """
+    Run dj-prep's `music` on the FileMaker page Book Event just read, so the
+    couple link is on the clipboard for the confirmation email. Same command as
+    the Music link button, so names, folder and tokens come out identical.
+
+    Never raises: the booking is already written by now, and a music failure
+    only means pressing Music link by hand. Returns one summary line.
+    """
+    if not fm_html_path:
+        return "Music: skipped (no page HTML); press Music link by hand"
+    if dry_run:
+        return "Music: would make the couple's music link"
+    cmd = [DJ_PREP_RUNNER, "music", "--fm-html", fm_html_path]
+    if test_mode:
+        cmd.append("--stage-only")
+    try:
+        result = run(cmd, timeout=180)
+    except Exception as e:
+        return f"Music: FAILED ({e}); press Music link by hand"
+    if result.returncode != 0:
+        return "Music: FAILED (see the dj-prep dialog); press Music link by hand"
+    if test_mode:
+        return "Music: staged only (test mode), nothing uploaded"
+    return "Music: couple link copied to clipboard"
+
+
+# =============================================================================
 # EMAIL FOLDER CREATION (Paul only)
 # =============================================================================
 
@@ -1192,9 +1234,10 @@ def create_email_folder(booking, dry_run=False):
 class GigBookingManager:
     """Orchestrates the full booking management flow."""
 
-    def __init__(self, credentials_path=None, dry_run=False, test_mode=False):
+    def __init__(self, credentials_path=None, dry_run=False, test_mode=False, fm_html_path=None):
         self.dry_run = dry_run
         self.test_mode = test_mode
+        self.fm_html_path = fm_html_path
         self.credentials_path = credentials_path or DEFAULT_CREDENTIALS_PATH
         self.actions = []  # Track what happened for summary
 
@@ -1745,6 +1788,15 @@ class GigBookingManager:
             print()
 
         # -----------------------------------------------------------------
+        # Phase 4b: Music link (Paul's weddings) — last write step, so a
+        # failure here never leaves the Matrix or calendar half-done.
+        # -----------------------------------------------------------------
+        if wants_music_link(booking):
+            print("— Making the music link...")
+            self.log(make_music_link(self.fm_html_path, self.dry_run, self.test_mode))
+            print()
+
+        # -----------------------------------------------------------------
         # Phase 5: Schedule nurture emails
         # -----------------------------------------------------------------
         if not self.test_mode:
@@ -1806,6 +1858,10 @@ def main():
         help="Path to Google service account credentials JSON",
         default=DEFAULT_CREDENTIALS_PATH,
     )
+    parser.add_argument(
+        "--fm-html",
+        help="Saved FileMaker page HTML; passed to dj-prep to make the music link",
+    )
 
     args = parser.parse_args()
 
@@ -1817,6 +1873,7 @@ def main():
         credentials_path=args.credentials,
         dry_run=args.dry_run,
         test_mode=args.test,
+        fm_html_path=args.fm_html,
     )
 
     try:
