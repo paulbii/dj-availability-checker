@@ -772,7 +772,15 @@ class Api:
                 if data['error'] == 'invalid_format':
                     return [{"text": "Invalid date format. Use MM-DD (e.g., 07-05).", "cls": "red"}]
                 elif data['error'] == 'not_found':
-                    return [{"text": f"No entry found for {data['formatted_date']} in the {self.sheet_name} sheet.", "cls": "yellow"}]
+                    lines = [{"text": f"No entry found for {data['formatted_date']} in the {self.sheet_name} sheet.", "cls": "yellow"}]
+                    try:
+                        date_obj = datetime.strptime(f"{self.year}-{month_day}", "%Y-%m-%d")
+                        clipboard_date = date_obj.strftime("%m-%d-%y")
+                        subprocess.run(["pbcopy"], input=clipboard_date.encode(), check=True)
+                        lines.append({"text": f"Copied to clipboard: {clipboard_date}", "cls": "cyan"})
+                    except Exception:
+                        pass
+                    return lines
                 elif data['error'] == 'worksheet_not_found':
                     return [{"text": f"The {self.sheet_name} worksheet was not found.", "cls": "red"}]
                 return [{"text": "An error occurred.", "cls": "red"}]
