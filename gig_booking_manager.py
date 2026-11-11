@@ -833,6 +833,98 @@ def split_backup_hits(titles):
     return already, [t for t in titles if t not in already]
 
 
+# =============================================================================
+# THE BACKUP STEP (shared by Book Event, Assign DJ and Backup Assigner)
+# =============================================================================
+
+# Default availability markers a backup write replaces outright; anything else
+# ('DAD-DUTY') is kept and BACKUP appended.
+BACKUP_REPLACES = {"", "OUT", "OK", "DAD", "STANFORD", "LAST", "OK TO BACKUP", "BACKUP"}
+
+
+def backup_cell_value(current_value):
+    v = (current_value or "").strip()
+    if v.upper() in BACKUP_REPLACES:
+        return "BACKUP"
+    return f"{v}, BACKUP"
+
+
+def backup_candidates(row_data, exclude, year, date_obj, col_map, bold_lookup):
+    """
+    (dj, note) pairs for the backup dialog: the year's eligible DJs, minus the
+    ones in `exclude` (booked that day), filtered through can_backup.
+    bold_lookup(dj) answers the Woody plain-vs-bold OUT question and is only
+    called for that case.
+    """
+    out = []
+    for cand in BACKUP_ELIGIBLE_DJS.get(year, BACKUP_ELIGIBLE_DJS[2026]):
+        if cand in exclude or cand not in col_map:
+            continue
+        cell = row_data.get(cand, "") or ""
+        bold = False
+        if cand == "Woody" and cell.strip().upper() == "OUT":
+            bold = bool(bold_lookup(cand))
+        ok, note = can_backup(cand, cell, bold, date_obj, year)
+        if ok:
+            out.append((cand, note))
+    return out
+
+
+def assign_backup(backup_dj, date_obj, date_display, sheets, row_num, col_map, row_data,
+                  year, test_mode=False, log=print, warn=None,
+                  conflicts=None, make_backup_event=None):
+    """
+    Calendar check, Matrix BACKUP, all-day calendar event, for one chosen backup.
+
+    Returns (status, summary). status is one of:
+      "assigned"             Matrix and calendar event written
+      "already_on_calendar"  a [XX] BACKUP event was there; Matrix written, no new event
+      "conflict"             the DJ has a booking that day; nothing written
+      "check_failed"         calendar unreadable; nothing written (not checked != clear)
+      "event_failed"         Matrix written, calendar event failed; make it by hand
+    conflicts / make_backup_event default to the real functions, looked up at
+    call time so tests can patch them on this module.
+    """
+    conflicts = conflicts or check_calendar_conflicts
+    make_backup_event = make_backup_event or create_allday_backup_event
+    bracket = f"[{get_dj_initials(backup_dj)}]"
+    try:
+        clash = conflicts(date_obj, bracket)
+    except Exception as e:
+        log(f"Backup: calendar check failed for {backup_dj}: {e}")
+        if warn:
+            warn(f"Calendar check failed for backup {bracket} on {date_display}:\n\n{e}\n\n"
+                 "Backup NOT assigned (not checked, so not written). The booking itself is intact.")
+        return "check_failed", "no backup (calendar check failed)"
+
+    already, clash = split_backup_hits(clash)
+    if clash:
+        log(f"Backup: calendar conflict for {backup_dj}: {clash}")
+        if warn:
+            warn(f"Calendar conflict for backup {bracket} on {date_display}:\n\n"
+                 + "\n".join(clash) + "\n\nBackup NOT assigned. The booking itself is intact.")
+        return "conflict", "no backup (calendar conflict)"
+
+    new_val = backup_cell_value(row_data.get(backup_dj, ""))
+    sheets.write_cell(row_num, col_map[backup_dj], new_val, year)
+    log(f"Matrix: {backup_dj} -> '{new_val}'")
+
+    if already:
+        log(f"Calendar: backup already on the calendar ({already[0]}), no new event")
+        return "already_on_calendar", f"backup {backup_dj} (calendar event already there)"
+
+    try:
+        title = make_backup_event(date_obj, backup_dj, test_mode)
+    except Exception as e:
+        log(f"Backup: calendar event failed for {backup_dj}, create by hand: {e}")
+        if warn:
+            warn(f"Matrix shows {backup_dj} as BACKUP but the calendar event failed:\n\n{e}\n\n"
+                 f"Create the all-day '{bracket} BACKUP DJ' event by hand, or the crosscheck will show the gap.")
+        return "event_failed", f"backup {backup_dj} (matrix only, calendar by hand)"
+    log(f"Calendar: created '{title}'")
+    return "assigned", f"backup {backup_dj}"
+
+
 def create_timed_calendar_event(booking, cal_start, cal_end, test_mode=False, app=None):
     """Create the primary timed calendar event. Returns the title. Raises RuntimeError on failure."""
     title = primary_event_title(booking)

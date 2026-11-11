@@ -49,14 +49,15 @@ import sys
 
 import calendar_read
 from calendar_app import CalendarApp
-from dj_core import BACKUP_ELIGIBLE_DJS, COLUMN_MAPS, DJ_EMAILS, get_dj_initials
+from dj_core import COLUMN_MAPS, DJ_EMAILS
 from gig_booking_manager import (
     CALENDAR_NAME,
     DEFAULT_CREDENTIALS_PATH,
     MockSheetsClient,
     SheetsClient,
+    assign_backup,
+    backup_candidates,
     calculate_spots_remaining,
-    can_backup,
     check_calendar_conflicts,
     check_existing_backup,
     create_allday_backup_event,
@@ -66,7 +67,6 @@ from gig_booking_manager import (
     show_backup_dialog,
     show_notification,
     show_warning_dialog,
-    split_backup_hits,
 )
 
 TEST_INVITEE = "paul@bigfundj.com"
@@ -84,38 +84,6 @@ _UNASSIGNED_RE = re.compile(r"^\[U[A-Z]\]\s")
 def is_backup_cell(current_value):
     """True when the cell holds BACKUP, alone or compound ('DAD, BACKUP')."""
     return "BACKUP" in [p.strip().upper() for p in (current_value or "").split(",")]
-
-
-# Default availability markers a backup write replaces outright; anything else
-# ('DAD-DUTY') is kept and BACKUP appended. Same set as Book Event.
-_BACKUP_REPLACES = {"", "OUT", "OK", "DAD", "STANFORD", "LAST", "OK TO BACKUP", "BACKUP"}
-
-
-def backup_cell_value(current_value):
-    v = (current_value or "").strip()
-    if v.upper() in _BACKUP_REPLACES:
-        return "BACKUP"
-    return f"{v}, BACKUP"
-
-
-def backup_candidates(row_data, assigned_dj, year, date_obj, col_map, bold_lookup):
-    """
-    (dj, note) pairs for the backup dialog: the year's eligible DJs, minus the
-    one just assigned, filtered through can_backup. bold_lookup(dj) answers the
-    Woody plain-vs-bold OUT question and is only called for that case.
-    """
-    out = []
-    for cand in BACKUP_ELIGIBLE_DJS.get(year, BACKUP_ELIGIBLE_DJS[2026]):
-        if cand == assigned_dj or cand not in col_map:
-            continue
-        cell = row_data.get(cand, "") or ""
-        bold = False
-        if cand == "Woody" and cell.strip().upper() == "OUT":
-            bold = bool(bold_lookup(cand))
-        ok, note = can_backup(cand, cell, bold, date_obj, year)
-        if ok:
-            out.append((cand, note))
-    return out
 
 
 def decrement_tba(current_value):
@@ -285,7 +253,7 @@ def assign(booking, sheets, app=None, fetch_day=calendar_read.fetch_day_events,
 
     existing_backup = check_existing_backup(row_data)
     candidates = backup_candidates(
-        row_data, dj, year, date_obj, col_map,
+        row_data, [dj], year, date_obj, col_map,
         bold_lookup=lambda cand: sheets.is_cell_bold(year, row_num, col_map[cand]))
     if existing_backup:
         log(f"Backup already assigned: {existing_backup}")
@@ -328,8 +296,10 @@ def assign(booking, sheets, app=None, fetch_day=calendar_read.fetch_day_events,
         log("Backup: skipped")
         backup_line = "no backup (skipped)"
     else:
-        backup_line = _assign_backup(choice, booking, sheets, row_num, col_map, after,
-                                     test_mode, log, warn, conflicts, make_backup_event)
+        _, backup_line = assign_backup(
+            choice, booking["date"], booking["date_display"], sheets, row_num, col_map, after,
+            year, test_mode=test_mode, log=log, warn=warn,
+            conflicts=conflicts, make_backup_event=make_backup_event)
 
     # ---- Phase 5: Paul's email folder ---------------------------------------
     # create_email_folder swallows its own errors and returns None, so the
@@ -351,51 +321,6 @@ def assign(booking, sheets, app=None, fetch_day=calendar_read.fetch_day_events,
     if notify:
         notify("DJ assigned", f"{new_title}\nMatrix TBA -> {dj}, invite sent to {invitee}\n{backup_line}{folder_line}")
     return True
-
-
-def _assign_backup(backup_dj, booking, sheets, row_num, col_map, row_data,
-                   test_mode, log, warn, conflicts, make_backup_event):
-    """Conflict check, matrix BACKUP, all-day calendar event. Returns a one-line summary."""
-    year = booking["year"]
-    date_obj = booking["date"]
-    bracket = f"[{get_dj_initials(backup_dj)}]"
-    try:
-        clash = conflicts(date_obj, bracket)
-    except Exception as e:
-        msg = (f"Calendar check failed for backup {bracket} on {booking['date_display']}:\n\n{e}\n\n"
-               "Backup NOT assigned (not checked, so not written). The DJ assignment is intact.")
-        log(f"Backup: calendar check failed for {backup_dj}: {e}")
-        if warn:
-            warn(msg)
-        return "no backup (calendar check failed)"
-    # A hand-made "[WM] BACKUP" alone means the backup is already on the calendar:
-    # just fill in the Matrix.
-    already_backup, clash = split_backup_hits(clash)
-    if clash:
-        msg = (f"Calendar conflict for backup {bracket} on {booking['date_display']}:\n\n"
-               + "\n".join(clash) + "\n\nBackup NOT assigned. The DJ assignment is intact.")
-        log(f"Backup: calendar conflict for {backup_dj}: {clash}")
-        if warn:
-            warn(msg)
-        return "no backup (calendar conflict)"
-
-    new_val = backup_cell_value(row_data.get(backup_dj, ""))
-    sheets.write_cell(row_num, col_map[backup_dj], new_val, year)
-    log(f"Matrix: {backup_dj} -> '{new_val}'")
-    if already_backup:
-        log(f"Calendar: backup already on the calendar ({already_backup[0]}), no new event")
-        return f"backup {backup_dj} (calendar event already there)"
-    try:
-        title = make_backup_event(date_obj, backup_dj, test_mode)
-    except Exception as e:
-        msg = (f"Matrix shows {backup_dj} as BACKUP but the calendar event failed:\n\n{e}\n\n"
-               f"Create the all-day '{bracket} BACKUP DJ' event by hand, or the crosscheck will show the gap.")
-        log(f"Backup: calendar event failed for {backup_dj}, create by hand: {e}")
-        if warn:
-            warn(msg)
-        return f"backup {backup_dj} (matrix only, calendar by hand)"
-    log(f"Calendar: created '{title}'")
-    return f"backup {backup_dj}"
 
 
 def main():

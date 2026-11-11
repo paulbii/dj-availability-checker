@@ -12,6 +12,7 @@ import unittest
 from datetime import datetime
 
 import assign_dj
+import gig_booking_manager
 from gig_booking_manager import MockSheetsClient
 
 
@@ -293,10 +294,10 @@ class TestAssignFlow(unittest.TestCase):
 class TestBackupCellValue(unittest.TestCase):
     def test_default_markers_replaced(self):
         for v in ("", "OUT", "OK", "DAD", "STANFORD", "LAST", "OK TO BACKUP"):
-            self.assertEqual(assign_dj.backup_cell_value(v), "BACKUP", v)
+            self.assertEqual(gig_booking_manager.backup_cell_value(v), "BACKUP", v)
 
     def test_other_values_kept_and_appended(self):
-        self.assertEqual(assign_dj.backup_cell_value("DAD-DUTY"), "DAD-DUTY, BACKUP")
+        self.assertEqual(gig_booking_manager.backup_cell_value("DAD-DUTY"), "DAD-DUTY, BACKUP")
 
 
 class FakeChooser:
