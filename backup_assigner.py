@@ -18,7 +18,6 @@ The script:
 """
 
 import argparse
-import calendar_read
 import html
 import json
 import os
@@ -29,9 +28,7 @@ from datetime import datetime
 # Import shared DJ data from dj_core
 from dj_core import (
     SPREADSHEET_ID,
-    BACKUP_ELIGIBLE_DJS,
     COLUMN_MAPS,
-    get_dj_initials,
     is_paid_backup,
     init_google_sheets_from_file,
     get_bulk_availability_data,
@@ -52,14 +49,12 @@ DJ_NAME_MAP = {
 
 # Import booking manager functions (reuse existing logic)
 from gig_booking_manager import (
-    can_backup,
+    assign_backup,
+    backup_candidates,
     calculate_spots_remaining,
     check_existing_backup,
     show_backup_dialog,
     show_warning_dialog,
-    create_allday_backup_event,
-    check_calendar_conflicts,
-    get_backup_title,
     SheetsClient,
     DEFAULT_CREDENTIALS_PATH,
 )
@@ -219,28 +214,16 @@ class BackupAssigner:
         # Calculate spots remaining
         spots = calculate_spots_remaining(row_data, self.year, date_obj)
 
-        # Build backup candidates
-        candidates = []
-        eligible_djs = BACKUP_ELIGIBLE_DJS.get(self.year, BACKUP_ELIGIBLE_DJS[2026])
-
-        for dj_name in eligible_djs:
-            # Skip DJs who are already booked on this date
-            if dj_name in booked_djs:
-                continue
-
-            col_map = COLUMN_MAPS.get(self.year, COLUMN_MAPS[2026])
-            if dj_name not in col_map:
-                continue
-
-            cell_val = row_data.get(dj_name, "")
-            is_bold = bold_status.get(dj_name, False)
-
-            eligible, note = can_backup(dj_name, cell_val, is_bold, date_obj, self.year)
-            if eligible:
-                candidates.append((dj_name, note))
-                paid = "paid" if is_paid_backup(dj_name) else "unpaid"
-                note_str = f" — {note}" if note else ""
-                print(f"  ✓ {dj_name} ({paid}){note_str}")
+        # Build backup candidates (skip DJs already booked on this date)
+        col_map = COLUMN_MAPS.get(self.year, COLUMN_MAPS[2026])
+        candidates = backup_candidates(
+            row_data, booked_djs, self.year, date_obj, col_map,
+            bold_lookup=lambda dj: bold_status.get(dj, False),
+        )
+        for dj_name, note in candidates:
+            paid = "paid" if is_paid_backup(dj_name) else "unpaid"
+            note_str = f" — {note}" if note else ""
+            print(f"  ✓ {dj_name} ({paid}){note_str}")
 
         if not candidates:
             print("  No DJs available for backup")
@@ -278,34 +261,6 @@ class BackupAssigner:
 
         print(f"  Selected: {backup_dj}")
 
-        # Check calendar conflicts
-        initials_bracket = f"[{get_dj_initials(backup_dj)}]"
-        try:
-            conflicts = check_calendar_conflicts(date_obj, initials_bracket)
-        except calendar_read.CalendarReadError as e:
-            msg = (
-                f"Calendar check FAILED for {initials_bracket} "
-                f"on {date_display}:\n\n{e}\n\n"
-                f"Backup NOT assigned."
-            )
-            print(f"  ⚠️  Calendar check failed: {e}")
-            show_warning_dialog(msg)
-            self.stats["skipped"] += 1
-            return
-
-        if conflicts:
-            conflict_list = "\n".join(conflicts)
-            msg = (
-                f"Calendar conflict for {initials_bracket} "
-                f"on {date_display}:\n\n{conflict_list}\n\n"
-                f"Backup NOT assigned."
-            )
-            print(f"  ⚠️  Calendar conflict: {conflict_list}")
-            show_warning_dialog(msg)
-            self.stats["conflicts"] += 1
-            self.stats["skipped"] += 1
-            return
-
         # Find row number for writing
         row_num = self.sheets.find_date_row(date_obj, self.year)
         if not row_num:
@@ -313,27 +268,20 @@ class BackupAssigner:
             self.stats["skipped"] += 1
             return
 
-        # Write BACKUP to matrix
-        col_map = COLUMN_MAPS.get(self.year, COLUMN_MAPS[2026])
-        col_num = col_map[backup_dj]
-        current_val = (row_data.get(backup_dj, "") or "").strip()
-        replace_values = {"", "OUT", "OK", "DAD", "STANFORD", "LAST", "OK TO BACKUP", "BACKUP"}
+        def step_log(msg):
+            print(f"  {msg}")
+            self.log(f"{date_display}: {msg}")
 
-        if current_val.upper() in replace_values:
-            new_val = "BACKUP"
+        status, _ = assign_backup(
+            backup_dj, date_obj, date_display, self.sheets, row_num, col_map, row_data,
+            self.year, test_mode=self.test_mode, log=step_log, warn=show_warning_dialog,
+        )
+        if status in ("assigned", "already_on_calendar", "event_failed"):
+            self.stats["assigned"] += 1
         else:
-            new_val = f"{current_val}, BACKUP"
-
-        self.sheets.write_cell(row_num, col_num, new_val, self.year)
-        self.log(f"{date_display}: {backup_dj} → {new_val}")
-        print(f"  ✓ Matrix: {backup_dj} → '{new_val}'")
-
-        # Create calendar event
-        backup_title = create_allday_backup_event(date_obj, backup_dj, self.test_mode)
-        self.log(f"{date_display}: created '{backup_title}'")
-        print(f"  ✓ Calendar: {backup_title}")
-
-        self.stats["assigned"] += 1
+            if status == "conflict":
+                self.stats["conflicts"] += 1
+            self.stats["skipped"] += 1
 
     def run(self):
         """Main execution flow."""

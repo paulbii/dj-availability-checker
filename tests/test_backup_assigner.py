@@ -36,8 +36,12 @@ class TestProcessDate(unittest.TestCase):
             "create_allday_backup_event": event,
             "show_warning_dialog": self.warnings.append,
         }
+        # The dialogs live in backup_assigner; the calendar calls are made
+        # by the shared assign_backup() in gig_booking_manager.
+        where = {"check_calendar_conflicts": "gig_booking_manager",
+                 "create_allday_backup_event": "gig_booking_manager"}
         for name, fn in stubs.items():
-            p = mock.patch(f"backup_assigner.{name}", side_effect=fn)
+            p = mock.patch(f"{where.get(name, 'backup_assigner')}.{name}", side_effect=fn)
             p.start()
             self.addCleanup(p.stop)
 
@@ -71,7 +75,6 @@ class TestProcessDate(unittest.TestCase):
         self.assertEqual(len(self.warnings), 1)
         self.assertEqual((self.ba.stats["conflicts"], self.ba.stats["skipped"]), (1, 1))
 
-    @unittest.expectedFailure  # blocked as a conflict today; fixed by Task 5
     def test_hand_made_backup_event_writes_matrix_only(self):
         self.clash = ["[WM] BACKUP"]
         self.run_date()
