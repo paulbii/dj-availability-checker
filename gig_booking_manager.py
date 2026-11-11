@@ -1720,7 +1720,6 @@ class GigBookingManager:
         # Backup dialog (skip for unassigned)
         # -----------------------------------------------------------------
         backup_dj = None
-        backup_already_on_cal = []
 
         if not booking["is_unassigned"] and not is_setup:
             print("— Phase 2: Backup assessment...")
@@ -1735,30 +1734,19 @@ class GigBookingManager:
             print(f"  Spots remaining: {spots}")
 
             # Get backup candidates
-            candidates = []
-            eligible_djs = BACKUP_ELIGIBLE_DJS.get(year, BACKUP_ELIGIBLE_DJS[2026])
+            def bold_lookup(dj):
+                if self.dry_run:
+                    print(f"  [DRY RUN] Would check bold for {dj} — assuming plain")
+                    return False
+                return self.sheets.is_cell_bold(year, row_num, col_map[dj])
 
-            for dj in eligible_djs:
-                if dj == dj_short:
-                    continue  # Can't backup yourself
-                if dj not in col_map:
-                    continue
-
-                cell_val = row_data.get(dj, "")
-                # Check bold only for Woody OUT
-                bold = False
-                if dj == "Woody" and (cell_val or "").strip().upper() == "OUT":
-                    if not self.dry_run:
-                        bold = self.sheets.is_cell_bold(year, row_num, col_map[dj])
-                    else:
-                        print(f"  [DRY RUN] Would check bold for Woody — assuming plain")
-
-                eligible, note = can_backup(dj, cell_val, bold, booking["date"], year)
-                if eligible:
-                    candidates.append((dj, note))
-                    paid = "paid" if is_paid_backup(dj) else "unpaid"
-                    note_str = f" — {note}" if note else ""
-                    print(f"  ✓ {dj} ({paid}){note_str}")
+            candidates = backup_candidates(
+                row_data, [dj_short], year, booking["date"], col_map, bold_lookup
+            )
+            for dj, note in candidates:
+                paid = "paid" if is_paid_backup(dj) else "unpaid"
+                note_str = f" — {note}" if note else ""
+                print(f"  ✓ {dj} ({paid}){note_str}")
 
             print()
 
@@ -1773,65 +1761,22 @@ class GigBookingManager:
                     booking["date_display"], spots, candidates, existing_backup
                 )
 
-            if backup_dj:
+            if backup_dj == "STOP":
+                # Cancel on the dialog: no backup, but the booking carries on.
+                print("  Backup cancelled")
+                self.log("Backup: cancelled")
+            elif backup_dj:
                 print(f"  Selected backup: {backup_dj}")
 
-                # Validate backup calendar conflict
-                backup_initials_bracket = f"[{get_dj_initials(backup_dj)}]"
-                print(f"  Checking calendar for {backup_initials_bracket}...")
+                def step_log(msg):
+                    print(f"  {msg}")
+                    self.log(msg)
 
-                # Check backup calendar conflicts (always check, even in dry-run)
-                try:
-                    backup_cal_conflicts = check_calendar_conflicts(
-                        booking["date"], backup_initials_bracket
-                    )
-                    backup_already_on_cal, backup_cal_conflicts = split_backup_hits(
-                        backup_cal_conflicts
-                    )
-                    backup_check_error = None
-                except calendar_read.CalendarReadError as e:
-                    backup_cal_conflicts = []
-                    backup_check_error = e
-
-                if backup_check_error:
-                    msg = (
-                        f"Calendar check FAILED for backup {backup_initials_bracket} "
-                        f"on {booking['date_display']}:\n\n{backup_check_error}\n\n"
-                        f"Backup NOT assigned. Primary booking is intact."
-                    )
-                    print(f"  ⚠️  Backup calendar check failed: {backup_check_error}")
-                    self.log(f"Backup skipped: calendar check failed for {backup_dj}")
-                    if not self.dry_run:
-                        show_warning_dialog(msg)
-                    backup_dj = None
-                elif backup_cal_conflicts:
-                    conflict_list = "\n".join(backup_cal_conflicts)
-                    msg = (
-                        f"Calendar conflict for {backup_initials_bracket} "
-                        f"on {booking['date_display']}:\n\n{conflict_list}\n\n"
-                        f"Backup NOT assigned. Primary booking is intact."
-                    )
-                    print(f"  ⚠️  Backup calendar conflict: {conflict_list}")
-                    self.log(f"Backup skipped: calendar conflict for {backup_dj}")
-                    if not self.dry_run:
-                        show_warning_dialog(msg)
-                    backup_dj = None
-                else:
-                    # Write backup to matrix, preserving meaningful statuses (e.g., "DAD" → "DAD, BACKUP")
-                    # but replacing default availability markers (OUT, OK, STANFORD, LAST, OK TO BACKUP)
-                    backup_col = col_map[backup_dj]
-                    current_backup_val = (row_data.get(backup_dj, "") or "").strip()
-                    replace_values = {"", "OUT", "OK", "DAD", "STANFORD", "LAST", "OK TO BACKUP", "BACKUP"}
-                    if current_backup_val and current_backup_val.upper() not in replace_values:
-                        new_backup_val = f"{current_backup_val}, BACKUP"
-                    else:
-                        new_backup_val = "BACKUP"
-                    if self.dry_run and not self.test_mode:
-                        print(f"  [DRY RUN] Would write '{new_backup_val}' to row {row_num}, col {backup_col} in {year} sheet")
-                    else:
-                        self.sheets.write_cell(row_num, backup_col, new_backup_val, year)
-                    self.log(f"Matrix: {backup_dj} → '{new_backup_val}'")
-                    print(f"  ✓ {backup_dj} → '{new_backup_val}' written to matrix")
+                assign_backup(
+                    backup_dj, booking["date"], booking["date_display"], self.sheets,
+                    row_num, col_map, row_data, year, test_mode=self.test_mode,
+                    log=step_log, warn=show_warning_dialog,
+                )
             elif not existing_backup and not self.dry_run:
                 self.log("Backup: skipped")
         elif is_setup:
@@ -1865,21 +1810,6 @@ class GigBookingManager:
             print("  ⚠️  No times available — skipping primary calendar event")
             self.log("Calendar: skipped (no times)")
 
-        # Backup event
-        if backup_dj and backup_already_on_cal:
-            print(f"  ✓ Backup already on the calendar: {backup_already_on_cal[0]}")
-            self.log(f"Calendar: backup already on the calendar ({backup_already_on_cal[0]}), no new event")
-        elif backup_dj:
-            if self.dry_run:
-                backup_title = get_backup_title(backup_dj)
-                print(f"  [DRY RUN] Would create: {backup_title}")
-                self.log(f"Calendar: would create '{backup_title}'")
-            else:
-                backup_title = create_allday_backup_event(
-                    booking["date"], backup_dj, self.test_mode
-                )
-                self.log(f"Calendar: created '{backup_title}'")
-                print(f"  ✓ Created: {backup_title}")
 
         print()
 

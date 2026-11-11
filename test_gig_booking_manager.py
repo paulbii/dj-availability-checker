@@ -887,8 +887,8 @@ class TestBookEventBackupStep(unittest.TestCase):
             "client_name": "Test Couple",
             "assigned_dj": "Henry Kim",
             "venue_name": "Oceano Hotel",
-            "start_time": "4:00",
-            "end_time": "10:00",
+            "setup_time": "4:00",
+            "clear_time": "10:00",
             "sound_type": "Standard Speakers",
             "has_ceremony_sound": False,
             "event_type": "Wedding",
@@ -954,7 +954,6 @@ class TestBookEventBackupStep(unittest.TestCase):
         self.assertEqual(self.backup_events, [])
         self.assertIn("Backup: skipped", self.manager.actions)
 
-    @unittest.expectedFailure  # crashes today (KeyError 'STOP'); fixed by Task 4
     def test_cancel_skips_backup_and_booking_finishes(self):
         self.dialog_choice = "STOP"
         self.run_booking()
