@@ -968,6 +968,98 @@ class TestBookEventBackupStep(unittest.TestCase):
         self.assertIn("Woody", names)
 
 
+class TestBookEventAagReservation(unittest.TestCase):
+    """Booking an Allied Arts Guild couple when a DJ is RESERVED for an AAG
+    couple that day (RESERVED in the DJ's column + names in AAG couple).
+    Booked to that DJ: RESERVED -> BOOKED as always. Booked to someone else,
+    or unassigned: ask whether to clear the reserved DJ (Paul, 2026-11-11)."""
+
+    ROW = {"Henry": "", "Woody": "OUT", "Paul": "RESERVED", "Stefano": "", "Stephanie": "",
+           "TBA": "", "AAG": "", "Felipe": ""}
+
+    def setUp(self):
+        self.dialog_calls = []
+        self.clear_answer = False
+        stubs = {
+            "check_calendar_conflicts": lambda d, br: [],
+            "show_backup_dialog": lambda *a, **k: None,
+            "create_allday_backup_event": lambda *a, **k: "x",
+            "create_timed_calendar_event": lambda *a, **k: "x",
+            "delete_hold_calendar_event": lambda *a, **k: False,
+            "show_warning_dialog": lambda *a, **k: None,
+            "show_notification": lambda *a, **k: None,
+            "create_email_folder": lambda *a, **k: None,
+            "make_music_link": lambda *a, **k: "music link: stubbed",
+            "open_booking_log_form": lambda *a, **k: None,
+            "show_multiple_booking_dialog": lambda *a, **k: True,
+            "show_clear_aag_reservation_dialog": self.fake_clear_dialog,
+        }
+        for name, fn in stubs.items():
+            p = mock.patch(f"gig_booking_manager.{name}", side_effect=fn)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def fake_clear_dialog(self, holder, couple, client, date_display):
+        self.dialog_calls.append((holder, couple, client))
+        return self.clear_answer
+
+    def run_booking(self, dj="Henry Kim", venue="Allied Arts Guild", couple="Kelly and Ryan", row=None):
+        import contextlib
+        import io as _io
+        data = {"event_date": "2027-03-27", "client_name": "Kelly Smith and Ryan Jones",
+                "assigned_dj": dj, "venue_name": venue, "setup_time": "4:00",
+                "clear_time": "10:00", "sound_type": "Standard Speakers",
+                "has_ceremony_sound": False, "event_type": "Wedding"}
+        fd, path = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f)
+        self.addCleanup(os.unlink, path)
+        self.manager = GigBookingManager(dry_run=False, test_mode=True)
+        self.manager.sheets.set_mock_row(2027, 5, dict(self.ROW, **(row or {})))
+        self.manager.sheets.set_mock_aag_couple(2027, 5, couple)
+        with contextlib.redirect_stdout(_io.StringIO()):
+            self.assertTrue(self.manager.run(path))
+
+    def writes(self):
+        from dj_core import COLUMN_MAPS
+        names = {v: k for k, v in COLUMN_MAPS[2027].items()}
+        return [(names[w["col"]], w["value"]) for w in self.manager.sheets.writes]
+
+    def test_booked_to_the_reserved_dj_just_books(self):
+        self.run_booking(dj="Paul Burchfield")
+        self.assertIn(("Paul", "BOOKED"), self.writes())
+        self.assertEqual(self.dialog_calls, [])
+
+    def test_other_dj_asks_and_clears_on_yes(self):
+        self.clear_answer = True
+        self.run_booking()
+        self.assertEqual(self.dialog_calls, [("Paul", "Kelly and Ryan", "Kelly and Ryan")])  # client_display = first names
+        self.assertIn(("Henry", "BOOKED"), self.writes())
+        self.assertIn(("Paul", ""), self.writes())
+
+    def test_other_dj_keeps_on_no(self):
+        self.run_booking()
+        self.assertEqual(len(self.dialog_calls), 1)
+        self.assertNotIn("Paul", [dj for dj, _ in self.writes()])
+
+    def test_cleared_cell_gets_the_djs_default(self):
+        self.clear_answer = True
+        self.run_booking(row={"Paul": "", "Stefano": "RESERVED"})
+        self.assertIn(("Stefano", ""), self.writes())  # Saturday default for Stefano is blank
+
+    def test_unassigned_booking_asks(self):
+        self.run_booking(dj="Unassigned")
+        self.assertEqual(len(self.dialog_calls), 1)
+
+    def test_not_aag_venue_does_not_ask(self):
+        self.run_booking(venue="Kohl Mansion")
+        self.assertEqual(self.dialog_calls, [])
+
+    def test_plain_reserved_hold_does_not_ask(self):
+        self.run_booking(couple="")
+        self.assertEqual(self.dialog_calls, [])
+
+
 class TestExistingBackup(unittest.TestCase):
 
     def test_no_backup(self):

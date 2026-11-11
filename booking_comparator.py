@@ -39,6 +39,7 @@ from dj_core import (
     DJ_INITIALS,
     init_google_sheets_from_file,
     get_bulk_availability_data,
+    is_reserved_label,
 )
 
 # Base URL for gig database JSON endpoint
@@ -284,7 +285,7 @@ def fetch_availability_matrix(year):
         # Collect booked DJs, skip RESERVED (held but not actually booked)
         booked = []
         for dj in date_info.get('booked_djs', []):
-            if '(RESERVED)' in dj:
+            if is_reserved_label(dj):
                 continue
             booked.append(dj)
 

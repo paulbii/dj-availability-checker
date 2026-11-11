@@ -56,6 +56,7 @@ from dj_core import (
     get_bulk_availability_data,
     auto_clear_stale_cache,
     dj_status,
+    aag_column_text,
     dj_range_bucket,
 )
 
@@ -122,17 +123,18 @@ def check_availability(sheet_name, month_day_to_check, service, spreadsheet, spr
                 # Show AAG RESERVED status
                 value_lower = str(value).lower()
                 if "reserved" in value_lower:
-                    response.append(f"{Fore.RED}{label}: {value}{Style.RESET_ALL}")
+                    shown = aag_column_text(value, selected_data, data.get('aag_couple', ''))
+                    response.append(f"{Fore.RED}{label}: {shown}{Style.RESET_ALL}")
                 elif value:
                     response.append(f"{label}: {value}")
                 else:
                     response.append(f"{label}: ")
             else:
                 gig = assigned_bookings.get(label)
-                status = dj_status(label, value, date_obj, sheet_name, gig)
+                status = dj_status(label, value, date_obj, sheet_name, gig, aag_couple=data.get('aag_couple', ''))
                 if status.can_book and not gig:
                     nearby = get_nearby_bookings_for_dj(label, date_obj, sheet_name, service, spreadsheet, spreadsheet_id)
-                    status = dj_status(label, value, date_obj, sheet_name, gig, nearby)
+                    status = dj_status(label, value, date_obj, sheet_name, gig, nearby, aag_couple=data.get('aag_couple', ''))
                 response.append(render_dj_line(label, status))
     
     response.append("\nAVAILABILITY SUMMARY:")

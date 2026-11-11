@@ -487,6 +487,55 @@ def calculate_event_times(booking):
     return cal_start, cal_end
 
 
+# AAG reservations (Paul, 2026-11-11). RESERVED in a DJ's column plus names in
+# the AAG couple column = that DJ is reserved for an Allied Arts Guild wedding
+# Tiana has told us about but not handed off. RESERVED with no couple is an
+# ordinary hold; RESERVED in the AAG column is Tiana holding the date, no DJ yet.
+# Kept out of COLUMNS_* on purpose: loops over those treat every column not in
+# their skip list as a DJ.
+AAG_COUPLE_COLUMN = {"2027": "K"}
+
+
+def aag_couple_from_row(row_values, year):
+    """The AAG couple names from a raw Matrix row (list of cell values), or ''."""
+    col = AAG_COUPLE_COLUMN.get(str(year))
+    if not col:
+        return ""
+    i = ord(col) - ord("A")
+    return row_values[i].strip() if i < len(row_values) and row_values[i] else ""
+
+
+def aag_reserved_dj(selected_data, aag_couple):
+    """The DJ reserved for the date's AAG couple, or None."""
+    if not aag_couple:
+        return None
+    for name, value in selected_data.items():
+        if name in ("Date", "TBA", "AAG"):
+            continue
+        if str(value or "").replace(" (BOLD)", "").strip().upper() == "RESERVED":
+            return name
+    return None
+
+
+def aag_column_text(value, selected_data, aag_couple):
+    """The AAG column as displayed: 'RESERVED (Brian and Ariana)' when the
+    couple is Tiana's and no DJ holds it yet, else the cell as is."""
+    value = str(value or "")
+    if aag_couple and "reserved" in value.lower() and not aag_reserved_dj(selected_data, aag_couple):
+        return f"{value} ({aag_couple})"
+    return value
+
+
+def reserved_label(dj_name, aag_couple=""):
+    """'Paul (RESERVED)' or 'Paul (RESERVED, AAG: Kelly and Ryan)'."""
+    return f"{dj_name} (RESERVED, AAG: {aag_couple})" if aag_couple else f"{dj_name} (RESERVED)"
+
+
+def is_reserved_label(label):
+    """True for a booked_djs entry made by reserved_label()."""
+    return "(RESERVED)" in label or "(RESERVED, AAG:" in label
+
+
 def get_columns_for_year(year):
     """Get the appropriate column mapping for the given year"""
     if year == "2027":
@@ -634,6 +683,8 @@ def get_bulk_availability_data(year, service, spreadsheet, spreadsheet_id, start
             # Analyze availability for this date
             availability = analyze_availability(selected_data, date_obj, year)
             
+            aag_couple = aag_couple_from_row(row_values, year)
+
             # Build detailed DJ status lists
             booked_djs = []
             backup_assigned = []
@@ -663,8 +714,7 @@ def get_bulk_availability_data(year, service, spreadsheet, spreadsheet_id, start
                 if 'booked' in statuses or 'backup' in statuses or 'wedfaire' in statuses or 'setup' in statuses:
                     pass  # Already handled above
                 elif value_lower == "reserved":
-                    # Stephanie can have RESERVED status
-                    booked_djs.append(f"{dj_name} (RESERVED)")
+                    booked_djs.append(reserved_label(dj_name, aag_couple))
                 else:
                     # Special case: Stefano with blank cell = MAYBE (not in system but potentially available)
                     if dj_name == "Stefano" and (not value_str or value_str.strip() == ""):
@@ -692,7 +742,8 @@ def get_bulk_availability_data(year, service, spreadsheet, spreadsheet_id, start
                 'available_to_backup': available_to_backup,
                 'availability': availability,
                 'aag_status': aag_status,
-                'aag_reserved': availability.get('aag_reserved', False)
+                'aag_reserved': availability.get('aag_reserved', False),
+                'aag_couple': aag_couple,
             })
         
         return all_dates
@@ -1136,7 +1187,8 @@ def _matrix_mismatch(clean_value):
     return f'matrix shows "{clean_value}"' if clean_value else "matrix is blank"
 
 
-def dj_status(dj_name, value, date_obj, year, gig_booking=None, nearby_bookings=None):
+def dj_status(dj_name, value, date_obj, year, gig_booking=None, nearby_bookings=None,
+              aag_couple=""):
     """Turn a Matrix cell (plus the Gig DB booking, if any) into a DJStatus.
 
     This is the single home of the display rules. The yes/no rule itself is
@@ -1169,7 +1221,8 @@ def dj_status(dj_name, value, date_obj, year, gig_booking=None, nearby_bookings=
     if low == "stanford":
         return DJStatus("STANFORD", "red", False, False)
     if "reserved" in low:
-        return DJStatus("RESERVED", "red", False, False)
+        text = f"RESERVED (AAG: {aag_couple})" if aag_couple else "RESERVED"
+        return DJStatus(text, "red", False, False)
     if low == "wedfaire":
         return DJStatus("WEDFAIRE", "red", False, False)
     if low == "setup":
@@ -1408,7 +1461,8 @@ def get_date_availability_data(sheet_name, month_day, service, spreadsheet, spre
                 'formatted_date': formatted_date,
                 'selected_data': selected_data,
                 'availability': availability,
-                'gig_bookings': gig_bookings
+                'gig_bookings': gig_bookings,
+                'aag_couple': aag_couple_from_row(row_contents, sheet_name),
             }
         else:
             return {'error': 'not_found', 'formatted_date': formatted_date}

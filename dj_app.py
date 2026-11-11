@@ -22,6 +22,7 @@ from dj_core import (
     get_gig_database_bookings,
     html_color,
     dj_status,
+    aag_column_text,
     dj_range_bucket,
 )
 
@@ -148,17 +149,17 @@ def tab_check_date(year, service, spreadsheet, spreadsheet_id, client):
                 elif label == "AAG":
                     vl = str(value).lower()
                     if "reserved" in vl:
-                        formatted_value = html_color("red", value)
+                        formatted_value = html_color("red", aag_column_text(value, selected_data, result.get('aag_couple', '')))
                     else:
                         formatted_value = html_color("dim", value) if value else ""
                     dj_items.append((label, formatted_value))
 
                 else:
                     gig = assigned_bookings.get(label)
-                    status = dj_status(label, value, date_obj, year, gig)
+                    status = dj_status(label, value, date_obj, year, gig, aag_couple=result.get('aag_couple', ''))
                     if status.can_book and not gig:
                         nearby = get_nearby_bookings_for_dj(label, date_obj, year, service, spreadsheet, spreadsheet_id)
-                        status = dj_status(label, value, date_obj, year, gig, nearby)
+                        status = dj_status(label, value, date_obj, year, gig, nearby, aag_couple=result.get('aag_couple', ''))
                     dj_items.append((label, render_dj_status(status)))
 
         mid_point = len(dj_items) // 2 + len(dj_items) % 2

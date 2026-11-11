@@ -49,12 +49,12 @@ class TestProcessDate(unittest.TestCase):
         self.ba.sheets = MockSheetsClient()
         self.ba.booking_details = {}
 
-    def run_date(self, **cells):
+    def run_date(self, booked_djs=("Henry",), **cells):
         row = {"Henry": "BOOKED", "Woody": "", "Paul": "", "Stefano": "",
                "Stephanie": "", "TBA": "", "AAG": "", "Felipe": ""}
         row.update(cells)
         info = {"date_obj": datetime(2027, 1, 23), "date": "Sat 1/23",
-                "selected_data": row, "bold_status": {}, "booked_djs": ["Henry"]}
+                "selected_data": row, "bold_status": {}, "booked_djs": list(booked_djs)}
         with contextlib.redirect_stdout(io.StringIO()):
             return self.ba.process_date(info, 1, 1)
 
@@ -97,6 +97,17 @@ class TestProcessDate(unittest.TestCase):
         self.choice = "STOP"
         self.assertEqual(self.run_date(), "STOP")
         self.assertEqual(self.writes(), [])
+
+    def test_reserved_dj_is_not_offered_as_their_own_backup(self):
+        # dj_core lists a RESERVED DJ as "Paul (RESERVED, AAG: ...)" in booked_djs.
+        offered = []
+        p = mock.patch("backup_assigner.show_backup_dialog",
+                       side_effect=lambda d, s, cands, *a: offered.extend(c for c, _ in cands))
+        p.start()
+        self.addCleanup(p.stop)
+        self.run_date(booked_djs=["Henry", "Paul (RESERVED, AAG: Kelly and Ryan)"], Paul="RESERVED")
+        self.assertNotIn("Paul", offered)
+        self.assertIn("Woody", offered)
 
 
 if __name__ == "__main__":

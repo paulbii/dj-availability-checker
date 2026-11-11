@@ -66,6 +66,9 @@ from dj_core import (
     calculate_arrival_offset,
     convert_times_to_24h,
     calculate_event_times,
+    aag_couple_from_row,
+    aag_reserved_dj,
+    get_default_cell_value,
 )
 
 
@@ -653,6 +656,10 @@ class SheetsClient:
 
         return data
 
+    def get_aag_couple(self, row_num, year):
+        """The AAG couple names on a row ('' if none, or no such column that year)."""
+        return aag_couple_from_row(self.get_sheet(year).row_values(row_num), year)
+
     def is_cell_bold(self, year, row_num, col_num):
         """
         Check if a cell has bold formatting.
@@ -748,6 +755,7 @@ class MockSheetsClient:
         self._initialized = True
         self.mock_data = {}  # {year: {row: {col_name: value}}}
         self.mock_bold = {}  # {(year, row, col): True/False}
+        self.mock_aag_couple = {}  # {(year, row): "Kelly and Ryan"}
         self.writes = []  # Track writes for verification
 
     def init(self):
@@ -758,6 +766,12 @@ class MockSheetsClient:
         if year not in self.mock_data:
             self.mock_data[year] = {}
         self.mock_data[year][row_num] = data
+
+    def set_mock_aag_couple(self, year, row_num, couple):
+        self.mock_aag_couple[(year, row_num)] = couple
+
+    def get_aag_couple(self, row_num, year):
+        return self.mock_aag_couple.get((year, row_num), "")
 
     def set_mock_bold(self, year, row_num, col_num, is_bold):
         """Set up mock bold status."""
@@ -821,6 +835,12 @@ def check_calendar_conflicts(date_obj, initials_bracket):
                 continue
             conflicts.append(title)
     return conflicts
+
+
+def is_aag_venue(venue_name):
+    """Allied Arts Guild / Cafe Wisteria."""
+    v = (venue_name or "").lower()
+    return "allied arts" in v or "wisteria" in v
 
 
 def split_backup_hits(titles):
@@ -1065,6 +1085,26 @@ def show_multiple_booking_dialog(dj_name, date_display, existing_count, existing
 
     choice = result.stdout.strip()
     return choice == "Add Booking"
+
+
+def show_clear_aag_reservation_dialog(holder, aag_couple, client, date_display):
+    """
+    The date has a DJ RESERVED for an AAG couple, and this AAG booking went to
+    someone else (or is unassigned). Ask whether to clear the reserved DJ.
+    Returns True to clear. Keep is the default, so a stray Return changes nothing.
+    """
+    message = (
+        f"{holder} is RESERVED on {date_display} for the AAG couple {aag_couple}.\\n\\n"
+        f"This booking ({client}) is not going to {holder}.\\n\\n"
+        f"If this is that couple, clear {holder}'s RESERVED?"
+    )
+    msg_esc = message.replace('"', '\\"')
+    script = f'''
+    set userChoice to button returned of (display dialog "{msg_esc}" with title "AAG Reservation" buttons {{"Clear {holder}", "Keep"}} default button "Keep" with icon caution)
+    return userChoice
+    '''
+    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=120)
+    return result.stdout.strip() == f"Clear {holder}"
 
 
 def show_backup_dialog(date_display, spots_remaining, candidates, existing_backup, booking_context=None):
@@ -1714,6 +1754,26 @@ class GigBookingManager:
                 self.sheets.write_cell(row_num, helper_col, helper_value, year)
             self.log(f"Matrix: {setup_helper} → '{helper_value}' (setup helper)")
             row_data[setup_helper] = helper_value
+
+        # AAG reservation (Paul, 2026-11-11): RESERVED in a DJ's column + names in
+        # the AAG couple column = that DJ holds an AAG couple not yet handed off.
+        # Booked to that DJ, RESERVED became BOOKED above. Booked elsewhere (or
+        # unassigned), ask whether this is that couple and the DJ should be cleared.
+        if is_aag_venue(booking["venue_name"]) and not is_setup:
+            aag_couple = self.sheets.get_aag_couple(row_num, year) if row_num != 999 else ""
+            holder = aag_reserved_dj(row_data, aag_couple)
+            if holder and holder != dj_short:
+                print(f"  {holder} is RESERVED for AAG couple {aag_couple}")
+                if self.dry_run:
+                    print(f"  [DRY RUN] Would ask whether to clear {holder}'s RESERVED")
+                elif show_clear_aag_reservation_dialog(holder, aag_couple, booking["client_display"],
+                                                       booking["date_display"]):
+                    cleared = get_default_cell_value(holder, booking["date"])
+                    self.sheets.write_cell(row_num, col_map[holder], cleared, year)
+                    row_data[holder] = cleared
+                    self.log(f"Matrix: {holder} RESERVED (AAG {aag_couple}) → '{cleared}'")
+                else:
+                    self.log(f"Matrix: {holder} kept RESERVED (AAG {aag_couple})")
         print()
 
         # -----------------------------------------------------------------

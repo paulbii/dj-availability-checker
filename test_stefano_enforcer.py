@@ -21,6 +21,8 @@ from stefano_maxed_enforcer import (
     is_fss,
     adjacent_weekend_dates,
     parse_matrix_date,
+    stefano_value,
+    AAG_RESERVED,
 )
 
 
@@ -343,6 +345,38 @@ class TestCalculateCalendarRepairs(unittest.TestCase):
         creates, deletes = calculate_calendar_repairs(rows, should, None, self.FUTURE)
         self.assertEqual(creates, {})
         self.assertEqual(deletes, {})
+
+
+class TestAagReservation(unittest.TestCase):
+    """RESERVED + AAG couple names = Stefano reserved for an AAG wedding
+    (Paul, 2026-11-11). Counts as one of his events; a plain RESERVED hold
+    does not."""
+
+    def test_value_from_row(self):
+        row = ["Sat 3/27", "", "", "", "OUT", "", "RESERVED", "", "", "", "Coleen and Keigo"]
+        self.assertEqual(stefano_value(row, "2027"), AAG_RESERVED)
+        self.assertEqual(stefano_value(row[:7], "2027"), "RESERVED")
+        self.assertEqual(stefano_value(["Sat 3/27", "", "", "", "", "", "ok"], "2027"), "OK")
+        self.assertEqual(stefano_value(["Sat 3/27"], "2027"), "")
+
+    def test_aag_reservation_triggers_weekend_buffer(self):
+        rows = make_rows([(3, 20, ""), (3, 27, AAG_RESERVED), (4, 3, "")], year=2027)
+        should, _, booked = compute_should_be_maxed(rows)
+        self.assertEqual(booked, [date(2027, 3, 27)])
+        self.assertIn(date(2027, 3, 20), should)
+        self.assertIn(date(2027, 4, 3), should)
+        self.assertNotIn(date(2027, 3, 27), should)  # never MAXED over his own event
+
+    def test_aag_reservation_counts_toward_monthly_cap(self):
+        rows = make_rows([(6, 5, "BOOKED"), (6, 12, AAG_RESERVED), (6, 26, "")], year=2027)
+        should, _, _ = compute_should_be_maxed(rows)
+        self.assertIn(date(2027, 6, 26), should)
+
+    def test_plain_reserved_hold_does_not_count(self):
+        rows = make_rows([(3, 20, ""), (3, 27, "RESERVED"), (4, 3, "")], year=2027)
+        should, _, booked = compute_should_be_maxed(rows)
+        self.assertEqual(booked, [])
+        self.assertEqual(should, set())
 
 
 if __name__ == "__main__":

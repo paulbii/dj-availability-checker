@@ -219,6 +219,7 @@ Shared business logic imported by all other scripts. Single source of truth for 
 |----------|---------------|
 | `COLUMNS_2026` | D=Henry, E=Woody, F=Paul, G=Stefano, H=Felipe, I=TBA, K=Stephanie, L=AAG |
 | `COLUMNS_2027` | D=Henry, E=Woody, F=Paul, G=Stefano, H=Stephanie, I=TBA, J=AAG, L=Felipe |
+| `AAG_COUPLE_COLUMN` | 2027: K = AAG couple names. Kept out of `COLUMNS_*` on purpose (loops over those treat unknown columns as DJs); read with `aag_couple_from_row()` |
 | `KNOWN_CELL_VALUES` | booked, backup, out, maxed, reserved, stanford, ok, ok to backup, dad, last, aag |
 | `BACKUP_ELIGIBLE_DJS` | DJs who can be assigned as backup |
 | `PAID_BACKUP_DJS` / `UNPAID_BACKUP_DJS` | Determines calendar event title: PAID BACKUP DJ vs BACKUP DJ |
@@ -241,6 +242,23 @@ Shared business logic imported by all other scripts. Single source of truth for 
 | `get_nearby_bookings_for_dj()` | DJ's bookings within ±3 days |
 | `auto_clear_stale_cache()` | Clears gig DB cache after 60 minutes |
 
+### AAG reservations (from 2026-11-11)
+
+Three AAG states on a date, by what the Matrix shows:
+
+| DJ column | AAG column | AAG couple (K) | Meaning |
+|---|---|---|---|
+| RESERVED | blank | names | That DJ is reserved for this AAG couple, not yet handed off |
+| blank/other | RESERVED | blank | Tiana is holding the date, no couple yet (one spot held) |
+| blank/other | RESERVED | names | Older form: a couple, no DJ chosen yet |
+
+Spot counts are the same either way (a RESERVED DJ is a filled spot). What reads the couple:
+the checkers show `RESERVED (AAG: names)`; the Stefano enforcer and the dashboard workload count
+it as that DJ's event (a plain RESERVED hold does not count); the 2027 assignments page lists it as
+assigned to that DJ; Book Event, booking an AAG venue to a different DJ or unassigned, asks whether
+to clear the reserved DJ (default Keep). When the couple books with the reserved DJ, RESERVED becomes
+BOOKED as always. Two RESERVED DJs on one date with a couple named is not expected; the first one wins.
+
 ### Known Matrix Cell Values
 
 | Value | Meaning | Counts as Booked? |
@@ -248,7 +266,7 @@ Shared business logic imported by all other scripts. Single source of truth for 
 | BOOKED | Confirmed paid event | Yes |
 | WEDFAIRE | Wedding fair or expo (not a paid event, but equipment is deployed and entered in Gig DB) | Yes |
 | BACKUP | Assigned as backup DJ for another DJ's event | No (backup slot) |
-| RESERVED | Date held/reserved (e.g., Stephanie) | Yes |
+| RESERVED | Date held for that DJ. **With names in the AAG couple column, the DJ is reserved for that Allied Arts Guild couple** (Tiana has told us, not yet handed off). See "AAG reservations" below | Yes |
 | STANFORD | Stanford event (treated as booked) | Yes |
 | AAG | Allied Arts Guild event | Yes |
 | OUT | Unavailable (bold vs plain matters for some DJs) | No |

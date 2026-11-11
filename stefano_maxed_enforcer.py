@@ -29,7 +29,7 @@ import sys
 from collections import defaultdict
 from datetime import date, timedelta
 
-from dj_core import init_google_sheets_from_file, get_default_cell_value
+from dj_core import AAG_COUPLE_COLUMN, aag_couple_from_row, get_default_cell_value, init_google_sheets_from_file
 
 # =============================================================================
 # CONFIGURATION
@@ -41,7 +41,12 @@ STEFANO_COL_NUM    = 7     # 1-based for gspread update_cell
 STEFANO_EMAIL      = "stefano@bigfundj.com"
 
 # Cell values that indicate Stefano is already committed — never overwrite these
-SKIP_VALUES = {"BOOKED", "BACKUP", "RESERVED", "STANFORD"}
+# RESERVED with names in the AAG couple column: Stefano is reserved for an
+# Allied Arts Guild wedding not yet handed off (Paul, 2026-11-11). It counts
+# as one of his events for both rules. A plain RESERVED hold does not.
+AAG_RESERVED = "RESERVED (AAG)"
+
+SKIP_VALUES = {"BOOKED", "BACKUP", "RESERVED", "STANFORD", AAG_RESERVED}
 
 
 # =============================================================================
@@ -91,6 +96,15 @@ def adjacent_weekend_dates(booked_date):
 # SHEET READING
 # =============================================================================
 
+def stefano_value(row, year):
+    """Stefano's cell, upper-cased; AAG_RESERVED when it is RESERVED and the
+    row names an AAG couple. The cell may be absent if the row is short."""
+    value = row[STEFANO_COL_INDEX].strip().upper() if len(row) > STEFANO_COL_INDEX else ""
+    if value == "RESERVED" and aag_couple_from_row(row, year):
+        return AAG_RESERVED
+    return value
+
+
 def read_stefano_column(spreadsheet, year):
     """
     Read the date column (A) and Stefano's column (G) for the given year tab.
@@ -100,8 +114,10 @@ def read_stefano_column(spreadsheet, year):
     """
     sheet = spreadsheet.worksheet(year)
 
-    # Single bulk read: columns A through G, rows 2 onward
-    rows_raw = sheet.get(f"A2:{STEFANO_COL_LETTER}400")
+    # Single bulk read, rows 2 onward: A through G, or through the AAG couple
+    # column when the year has one
+    last_col = max(STEFANO_COL_LETTER, AAG_COUPLE_COLUMN.get(str(year), "A"))
+    rows_raw = sheet.get(f"A2:{last_col}400")
 
     result = []
     for i, row in enumerate(rows_raw):
@@ -112,8 +128,7 @@ def read_stefano_column(spreadsheet, year):
         if not date_obj:
             continue
 
-        # Stefano's cell may be absent if the row is short
-        value = row[STEFANO_COL_INDEX].strip().upper() if len(row) > STEFANO_COL_INDEX else ""
+        value = stefano_value(row, year)
 
         row_number = i + 2  # +1 for 1-based, +1 for skipped header row
         result.append((date_obj, row_number, value))
@@ -140,7 +155,7 @@ def compute_should_be_maxed(rows):
     # Only Fri/Sat/Sun bookings trigger rules
     booked_fss = [
         d for d, row, val in rows
-        if val in ("BOOKED", "WEDFAIRE") and is_fss(d)
+        if val in ("BOOKED", "WEDFAIRE", AAG_RESERVED) and is_fss(d)
     ]
 
     # Build the set of dates that SHOULD be MAXED, with reasons

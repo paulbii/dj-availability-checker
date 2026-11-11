@@ -27,6 +27,7 @@ from dj_core import (
     get_gig_database_bookings,
     get_venue_cautions,
     dj_status,
+    aag_column_text,
     dj_range_bucket,
 )
 
@@ -816,16 +817,17 @@ class Api:
                 elif label == "AAG":
                     vl = str(value).lower()
                     if "reserved" in vl:
-                        lines.append({"text": f"{label}: {value}", "cls": "red"})
+                        shown = aag_column_text(value, selected_data, data.get('aag_couple', ''))
+                        lines.append({"text": f"{label}: {shown}", "cls": "red"})
                     else:
                         lines.append({"text": f"{label}: {value}", "cls": ""})
 
                 else:
                     gig = assigned_bookings.get(label)
-                    status = dj_status(label, value, date_obj, self.sheet_name, gig)
+                    status = dj_status(label, value, date_obj, self.sheet_name, gig, aag_couple=data.get('aag_couple', ''))
                     if status.can_book and not gig:
                         nearby = get_nearby_bookings_for_dj(label, date_obj, self.sheet_name, self.service, self.spreadsheet, self.spreadsheet_id)
-                        status = dj_status(label, value, date_obj, self.sheet_name, gig, nearby)
+                        status = dj_status(label, value, date_obj, self.sheet_name, gig, nearby, aag_couple=data.get('aag_couple', ''))
                     lines.append(self._render_dj_line(label, status))
 
             # Summary
