@@ -832,6 +832,143 @@ class TestSetupBookingWrite(unittest.TestCase):
             os.unlink(path)
 
 
+def gig_booking_manager_mod():
+    import gig_booking_manager
+    return gig_booking_manager
+
+
+class TestBookEventBackupStep(unittest.TestCase):
+    """Book Event's backup step, end to end through run(), with every
+    outbound call stubbed. Pins today's behaviour before the step moves to
+    a shared assign_backup() (docs/plans/2026-11-11-one-backup-step.md)."""
+
+    ROW = {"Henry": "", "Woody": "", "Paul": "", "Stefano": "", "Stephanie": "",
+           "TBA": "", "AAG": "", "Felipe": ""}
+
+    def setUp(self):
+        self.backup_clash = []      # what the calendar says for the backup DJ
+        self.backup_events = []     # create_allday_backup_event calls
+        self.warnings = []
+        self.dialog_choice = None
+        self.dialog_calls = []
+
+        def conflicts(date_obj, bracket):
+            return [] if bracket == "[HK]" else list(self.backup_clash)
+
+        def dialog(date_display, spots, candidates, existing):
+            self.dialog_calls.append({"candidates": candidates, "existing": existing})
+            return self.dialog_choice
+
+        def backup_event(date_obj, dj, test_mode=False, app=None):
+            self.backup_events.append(dj)
+            return f"[{dj[:2].upper()}] BACKUP DJ"
+
+        stubs = {
+            "check_calendar_conflicts": conflicts,
+            "show_backup_dialog": dialog,
+            "create_allday_backup_event": backup_event,
+            "create_timed_calendar_event": lambda *a, **k: "[HK] Test Couple",
+            "show_warning_dialog": self.warnings.append,
+            "show_notification": lambda *a, **k: None,
+            "create_email_folder": lambda *a, **k: None,
+            "make_music_link": lambda *a, **k: "music link: stubbed",
+            "open_booking_log_form": lambda *a, **k: None,
+        }
+        for name, fn in stubs.items():
+            p = mock.patch(f"gig_booking_manager.{name}", side_effect=fn)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def run_booking(self, row=None):
+        import contextlib
+        import io as _io
+        data = {
+            "event_date": "2027-01-23",
+            "client_name": "Test Couple",
+            "assigned_dj": "Henry Kim",
+            "venue_name": "Oceano Hotel",
+            "start_time": "4:00",
+            "end_time": "10:00",
+            "sound_type": "Standard Speakers",
+            "has_ceremony_sound": False,
+            "event_type": "Wedding",
+        }
+        fd, path = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f)
+        self.addCleanup(os.unlink, path)
+        self.manager = GigBookingManager(dry_run=False, test_mode=True)
+        self.manager.sheets.set_mock_row(2027, 5, dict(self.ROW, **(row or {})))
+        with contextlib.redirect_stdout(_io.StringIO()):
+            ok = self.manager.run(path)
+        self.assertTrue(ok)
+        return self.manager
+
+    def backup_writes(self):
+        return [(w["col"], w["value"]) for w in self.manager.sheets.writes
+                if "BACKUP" in w["value"]]
+
+    def woody_col(self):
+        from dj_core import COLUMN_MAPS
+        return COLUMN_MAPS[2027]["Woody"]
+
+    def test_pick_writes_matrix_and_event(self):
+        self.dialog_choice = "Woody"
+        self.run_booking()
+        self.assertEqual(self.backup_writes(), [(self.woody_col(), "BACKUP")])
+        self.assertEqual(self.backup_events, ["Woody"])
+        self.assertEqual(self.warnings, [])
+
+    def test_real_booking_blocks_backup(self):
+        self.dialog_choice = "Woody"
+        self.backup_clash = ["[WM] Smith Wedding"]
+        self.run_booking()
+        self.assertEqual(self.backup_writes(), [])
+        self.assertEqual(self.backup_events, [])
+        self.assertEqual(len(self.warnings), 1)
+
+    def test_hand_made_backup_event_writes_matrix_only(self):
+        self.dialog_choice = "Woody"
+        self.backup_clash = ["[WM] BACKUP"]
+        self.run_booking()
+        self.assertEqual(self.backup_writes(), [(self.woody_col(), "BACKUP")])
+        self.assertEqual(self.backup_events, [])
+        self.assertEqual(self.warnings, [])
+
+    def test_dad_duty_keeps_its_value(self):
+        from dj_core import COLUMN_MAPS
+        self.dialog_choice = "Felipe"
+        self.run_booking(row={"Felipe": "DAD-DUTY"})
+        self.assertEqual(self.backup_writes(), [(COLUMN_MAPS[2027]["Felipe"], "DAD-DUTY, BACKUP")])
+
+    def test_existing_backup_is_passed_to_dialog(self):
+        self.run_booking(row={"Paul": "BACKUP"})
+        self.assertEqual(self.dialog_calls[0]["existing"], "Paul")
+        self.assertEqual(self.backup_writes(), [])
+        self.assertEqual(self.backup_events, [])
+
+    def test_skip_writes_nothing(self):
+        self.dialog_choice = None
+        self.run_booking()
+        self.assertEqual(self.backup_writes(), [])
+        self.assertEqual(self.backup_events, [])
+        self.assertIn("Backup: skipped", self.manager.actions)
+
+    @unittest.expectedFailure  # crashes today (KeyError 'STOP'); fixed by Task 4
+    def test_cancel_skips_backup_and_booking_finishes(self):
+        self.dialog_choice = "STOP"
+        self.run_booking()
+        self.assertEqual(self.backup_writes(), [])
+        self.assertEqual(self.backup_events, [])
+        self.assertEqual(gig_booking_manager_mod().create_timed_calendar_event.call_count, 1)
+
+    def test_candidates_exclude_booked_dj(self):
+        self.run_booking()
+        names = [c[0] for c in self.dialog_calls[0]["candidates"]]
+        self.assertNotIn("Henry", names)
+        self.assertIn("Woody", names)
+
+
 class TestExistingBackup(unittest.TestCase):
 
     def test_no_backup(self):
