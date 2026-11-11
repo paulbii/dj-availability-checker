@@ -66,6 +66,7 @@ from gig_booking_manager import (
     show_backup_dialog,
     show_notification,
     show_warning_dialog,
+    split_backup_hits,
 )
 
 TEST_INVITEE = "paul@bigfundj.com"
@@ -367,6 +368,9 @@ def _assign_backup(backup_dj, booking, sheets, row_num, col_map, row_data,
         if warn:
             warn(msg)
         return "no backup (calendar check failed)"
+    # A hand-made "[WM] BACKUP" alone means the backup is already on the calendar:
+    # just fill in the Matrix.
+    already_backup, clash = split_backup_hits(clash)
     if clash:
         msg = (f"Calendar conflict for backup {bracket} on {booking['date_display']}:\n\n"
                + "\n".join(clash) + "\n\nBackup NOT assigned. The DJ assignment is intact.")
@@ -378,6 +382,9 @@ def _assign_backup(backup_dj, booking, sheets, row_num, col_map, row_data,
     new_val = backup_cell_value(row_data.get(backup_dj, ""))
     sheets.write_cell(row_num, col_map[backup_dj], new_val, year)
     log(f"Matrix: {backup_dj} -> '{new_val}'")
+    if already_backup:
+        log(f"Calendar: backup already on the calendar ({already_backup[0]}), no new event")
+        return f"backup {backup_dj} (calendar event already there)"
     try:
         title = make_backup_event(date_obj, backup_dj, test_mode)
     except Exception as e:

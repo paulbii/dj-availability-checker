@@ -823,6 +823,16 @@ def check_calendar_conflicts(date_obj, initials_bracket):
     return conflicts
 
 
+def split_backup_hits(titles):
+    """Split conflict-check hits into (already_backup, real_conflicts).
+
+    check_calendar_conflicts skips "BACKUP DJ", but a hand-made "[WM] BACKUP"
+    gets through. That means the backup is already on the calendar, not a clash.
+    """
+    already = [t for t in titles if "BACKUP" in t.upper()]
+    return already, [t for t in titles if t not in already]
+
+
 def create_timed_calendar_event(booking, cal_start, cal_end, test_mode=False, app=None):
     """Create the primary timed calendar event. Returns the title. Raises RuntimeError on failure."""
     title = primary_event_title(booking)
@@ -1618,6 +1628,7 @@ class GigBookingManager:
         # Backup dialog (skip for unassigned)
         # -----------------------------------------------------------------
         backup_dj = None
+        backup_already_on_cal = []
 
         if not booking["is_unassigned"] and not is_setup:
             print("— Phase 2: Backup assessment...")
@@ -1681,6 +1692,9 @@ class GigBookingManager:
                 try:
                     backup_cal_conflicts = check_calendar_conflicts(
                         booking["date"], backup_initials_bracket
+                    )
+                    backup_already_on_cal, backup_cal_conflicts = split_backup_hits(
+                        backup_cal_conflicts
                     )
                     backup_check_error = None
                 except calendar_read.CalendarReadError as e:
@@ -1760,7 +1774,10 @@ class GigBookingManager:
             self.log("Calendar: skipped (no times)")
 
         # Backup event
-        if backup_dj:
+        if backup_dj and backup_already_on_cal:
+            print(f"  ✓ Backup already on the calendar: {backup_already_on_cal[0]}")
+            self.log(f"Calendar: backup already on the calendar ({backup_already_on_cal[0]}), no new event")
+        elif backup_dj:
             if self.dry_run:
                 backup_title = get_backup_title(backup_dj)
                 print(f"  [DRY RUN] Would create: {backup_title}")

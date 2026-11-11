@@ -396,6 +396,21 @@ class TestBackupPhase(unittest.TestCase):
         self.assertEqual(self.events, [])
         self.assertTrue(any("conflict" in line.lower() for line in self.log))
 
+    def test_existing_backup_event_on_calendar_writes_matrix_only(self):
+        # 6/26/27: a hand-made "[WM] BACKUP" event was already on the calendar
+        # but the Matrix still said OUT. Not a conflict: fill in the Matrix, no second event.
+        self.conflict_answer = ["[WM] BACKUP"]
+        self.assertTrue(self.run_assign(booking("Henry"), FakeChooser("Woody")))
+        self.assertEqual(self.backup_writes(), [(5, "BACKUP")])  # Woody = E (5) in 2027
+        self.assertEqual(self.events, [])
+        self.assertTrue(any("already on the calendar" in line for line in self.log))
+
+    def test_backup_event_plus_real_booking_still_blocks(self):
+        self.conflict_answer = ["[WM] BACKUP", "[WM] Someone Else"]
+        self.assertTrue(self.run_assign(booking("Henry"), FakeChooser("Woody")))
+        self.assertEqual(self.backup_writes(), [])
+        self.assertEqual(self.events, [])
+
     def test_calendar_unreadable_blocks_backup(self):
         def boom(date_obj, bracket):
             raise RuntimeError("CalDAV down")
@@ -463,5 +478,23 @@ class TestEmailFolderStep(unittest.TestCase):
         self.assertIn((9, ""), {(w["col"], w["value"]) for w in self.sheets.writes})
 
 
+class TestSplitBackupHits(unittest.TestCase):
+    """Shared by Book Event and Assign DJ."""
+
+    def test_hand_made_backup_is_not_a_conflict(self):
+        from gig_booking_manager import split_backup_hits
+        self.assertEqual(split_backup_hits(["[WM] BACKUP"]), (["[WM] BACKUP"], []))
+
+    def test_real_booking_stays_a_conflict(self):
+        from gig_booking_manager import split_backup_hits
+        self.assertEqual(split_backup_hits(["[WM] BACKUP", "[WM] Smith Wedding"]),
+                         (["[WM] BACKUP"], ["[WM] Smith Wedding"]))
+
+    def test_nothing_in_nothing_out(self):
+        from gig_booking_manager import split_backup_hits
+        self.assertEqual(split_backup_hits([]), ([], []))
+
+
 if __name__ == "__main__":
     unittest.main()
+
