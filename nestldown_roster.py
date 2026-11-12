@@ -13,6 +13,7 @@ import ftplib
 import io
 import os
 import re
+import time
 from collections import defaultdict
 from zoneinfo import ZoneInfo
 
@@ -440,16 +441,47 @@ def upload_html(html_content):
         print("ERROR: No FTP credentials found. Run with --setup-ftp first.")
         return False
 
-    try:
+    # iPage sometimes closes the control connection after it has the whole file but
+    # before it says "226 Transfer complete" (EOFError, 2026-11-12). So a failed
+    # attempt is checked against the server before it counts as a failure, and a
+    # real failure is retried on a new connection.
+    want = html_content.encode("utf-8")
+
+    def connect():
         ftp = ftplib.FTP(host)
         ftp.login(username, password)
         ftp.cwd(FTP_REMOTE_DIR)
-        ftp.storbinary(f"STOR {FTP_FILENAME}", io.BytesIO(html_content.encode("utf-8")))
-        ftp.quit()
-        return True
-    except Exception as e:
-        print(f"ERROR: FTP upload failed: {e}")
-        return False
+        return ftp
+
+    def remote_matches():
+        try:
+            ftp = connect()
+            chunks = []
+            ftp.retrbinary(f"RETR {FTP_FILENAME}", chunks.append)
+            ftp.quit()
+        except Exception:
+            return False
+        return b"".join(chunks) == want
+
+    attempts = 3
+    for attempt in range(1, attempts + 1):
+        try:
+            ftp = connect()
+            ftp.storbinary(f"STOR {FTP_FILENAME}", io.BytesIO(want))
+            ftp.quit()
+            return True
+        except ftplib.error_perm as e:      # bad login or no permission: retrying won't help
+            print(f"ERROR: FTP upload failed: {e}")
+            return False
+        except Exception as e:
+            print(f"FTP upload attempt {attempt} of {attempts} failed: {e!r}")
+            if remote_matches():
+                print("Server has the new page anyway; counting it as uploaded.")
+                return True
+            if attempt < attempts:
+                time.sleep(5)
+    print("ERROR: FTP upload failed.")
+    return False
 
 
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
@@ -501,6 +533,7 @@ def main():
             print("  Upload complete")
         else:
             print("  Upload failed. Local file available for inspection.")
+            raise SystemExit(1)     # non-zero so run_nestldown_roster.sh sends the alert
     else:
         print("  Skipping upload (--local-only)")
 

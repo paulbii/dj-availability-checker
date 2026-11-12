@@ -24,11 +24,15 @@ fi
 # Failure. Alert once per outage (sentinel present = already alerted, still down).
 if [ ! -f "$SENTINEL" ]; then
   TAIL=$(print -r -- "$OUT" | tail -n 3 | tr '\n' ' ')
-  "$REMCTL" add "Nestldown roster page stopped updating (exit $STATUS)" \
-    -l "BIG FUN" \
-    -n "The nightly auto-update crashed, so the live page is frozen. Last log: ${TAIL} | Fix: run run_nestldown_roster.sh in dj-availability-checker, then check /tmp/nestldown-roster.log" \
-    -f 2>&1
-  touch "$SENTINEL"
+  TITLE="Nestldown roster page stopped updating (exit $STATUS)"
+  NOTE="The nightly auto-update crashed, so the live page is frozen. Last log: ${TAIL} | Fix: run run_nestldown_roster.sh in dj-availability-checker, then check /tmp/nestldown-roster.log"
+  # remctl often cannot see the BIG FUN list ("list not found"); the reminders CLI can.
+  # The sentinel is written only when an alert really went out, so a failed alert
+  # is tried again on the next run instead of going quiet.
+  if "$REMCTL" add "$TITLE" -l "BIG FUN" -n "$NOTE" -f 2>&1 \
+     || /opt/homebrew/bin/reminders add "BIG FUN" "$TITLE" --priority high --notes "$NOTE" 2>&1; then
+    touch "$SENTINEL"
+  fi
 fi
 
 exit $STATUS
