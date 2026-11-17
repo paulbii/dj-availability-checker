@@ -319,14 +319,17 @@ def extract_client_first_names(client_name):
     Extract first names for calendar title.
     Couples: "Anya Hee and Hilal Ahmad" → "Anya and Hilal"
     Non-couples: "Bird Family Seder" → "Bird Family Seder"
+    A non-breaking space binds a two-word first name (Gig DB convention):
+    "Frankie Lee and Wen\xa0Wen Zhang" → "Frankie and Wen Wen"
     """
     if " and " not in client_name:
         return client_name
     parts = client_name.split(" and ", 1)
-    left_words = parts[0].strip().split()
-    right_words = parts[1].strip().split()
+    # Regular spaces only: split() with no argument also breaks on the NBSP.
+    left_words = [w for w in parts[0].split(" ") if w]
+    right_words = [w for w in parts[1].split(" ") if w]
     if len(left_words) >= 2 and len(right_words) >= 2:
-        return f"{left_words[0]} and {right_words[0]}"
+        return f"{left_words[0]} and {right_words[0]}".replace("\xa0", " ")
     return client_name
 
 

@@ -170,6 +170,17 @@ class TestClientNameExtraction(unittest.TestCase):
             "Anya and Hilal"
         )
 
+    def test_nbsp_compound_first_name(self):
+        # Gig DB convention: a non-breaking space binds a two-word first name.
+        self.assertEqual(
+            extract_client_first_names("Frankie Lee and Wen\xa0Wen Zhang"),
+            "Frankie and Wen Wen"
+        )
+        self.assertEqual(
+            extract_client_first_names("Mary\xa0Anne Smith and Bob Jones"),
+            "Mary Anne and Bob"
+        )
+
     def test_non_couple(self):
         self.assertEqual(
             extract_client_first_names("Bird Family Seder"),
