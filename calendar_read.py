@@ -42,8 +42,8 @@ class CalendarReadError(Exception):
 
 
 class CalendarNotConfigured(CalendarReadError):
-    """This machine has no CalDAV credentials or library, so there is nothing
-    to read from. Different from a read that was tried and failed."""
+    """This machine has no CalDAV credentials, so there is nothing to read
+    from. Different from a read that was tried and failed."""
 
 
 # One event on one calendar. For a timed event start and end are Pacific
@@ -141,8 +141,8 @@ def fetch_events_by_day(calendar_names, start_date, end_date, connect=_connect):
     each day it covers. All-day events come first, then timed ones by start.
     Days with nothing are left out. Recurring events are expanded.
 
-    Raises CalendarNotConfigured when this machine has no credentials or no
-    CalDAV library, and CalendarReadError when the read was tried and failed.
+    Raises CalendarNotConfigured when this machine has no CalDAV credentials,
+    and CalendarReadError for anything else, a missing library included.
     """
     unknown = [n for n in calendar_names if n not in CALENDAR_URLS]
     if unknown:
@@ -163,8 +163,6 @@ def fetch_events_by_day(calendar_names, start_date, end_date, connect=_connect):
                     day += datetime.timedelta(days=1)
     except CalendarNotConfigured:
         raise
-    except ImportError as e:
-        raise CalendarNotConfigured(f"{type(e).__name__}: {e}") from e
     except Exception as e:
         raise CalendarReadError(f"{type(e).__name__}: {e}") from e
 

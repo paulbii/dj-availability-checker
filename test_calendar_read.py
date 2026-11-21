@@ -208,12 +208,22 @@ class TestFetchEventsByDay(unittest.TestCase):
             fetch_events_by_day(["Paul"], date(2026, 11, 20), date(2026, 11, 20),
                                 connect=no_credentials)
 
-    def test_missing_library_raises_not_configured(self):
+    def test_missing_library_is_a_failed_read_not_a_quiet_one(self):
+        # The frozen app shipped without caldav's submodules (2026-11-21) and
+        # the block silently never appeared. A missing library must show.
         def no_library(names):
-            raise ImportError("No module named 'caldav'")
-        with self.assertRaises(CalendarNotConfigured):
+            raise ImportError("No module named 'caldav.davclient'")
+        with self.assertRaises(CalendarReadError) as ctx:
             fetch_events_by_day(["Paul"], date(2026, 11, 20), date(2026, 11, 20),
                                 connect=no_library)
+        self.assertNotIsInstance(ctx.exception, CalendarNotConfigured)
+
+    def test_frozen_apps_bundle_the_calendar_library(self):
+        # caldav loads its submodules lazily, so PyInstaller misses them
+        # unless told to collect them.
+        from pathlib import Path
+        build = Path(calendar_read.__file__).with_name("build_apps.sh").read_text()
+        self.assertIn("--collect-submodules caldav", build)
 
     def test_pauls_calendars_have_urls(self):
         for name in ("Paul", "BIG FUN"):

@@ -10,11 +10,14 @@ cd "$(dirname "$0")"
 
 rm -rf release build dist && mkdir release
 
+# --collect-submodules caldav: caldav loads its submodules lazily, so
+# PyInstaller misses them and the app cannot read Paul's calendars.
 for YEAR in 2026 2027; do
   .venv/bin/pyinstaller --noconfirm --clean --windowed \
     --name "DJ Availability $YEAR" \
     --icon app_icon.icns \
     --osx-bundle-identifier "com.bigfundj.dj-availability-$YEAR" \
+    --collect-submodules caldav \
     "check_${YEAR}_gui.py"
 
   APP="dist/DJ Availability $YEAR.app"
