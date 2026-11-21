@@ -1810,3 +1810,113 @@ def get_nearby_bookings_for_dj(dj_name, date_obj, year, service, spreadsheet, sp
             nearby_bookings.append(formatted)
     
     return nearby_bookings
+
+
+# =============================================================================
+# A DJ's own calendars (Paul, 2026-11-20)
+# =============================================================================
+# The checker lists what is on Paul's own calendars for a date. The events are
+# information, not blockers: he may be able to move them. Nothing here changes
+# a status or a spot count; those come from the Matrix alone.
+
+PERSONAL_CALENDARS = {"Paul": ["Paul", "BIG FUN"]}
+
+# Calendars whose all-day items are reminders ("Pay Chase"), not time away, so
+# they are left out. A real all-day absence goes on "BIG FUN" (Paul, 2026-11-21).
+ALL_DAY_IS_A_REMINDER = {"Paul"}
+
+PERSONAL_MARK_FOOTNOTE = "* has something on their own calendars that day (check the date to see it)"
+
+_OUT_TITLE = re.compile(r"\bOUT\b")
+
+
+def _as_date(d):
+    return d.date() if isinstance(d, datetime) else d
+
+
+def _clock(dt):
+    return dt.strftime("%-I:%M %p")
+
+
+def _event_when(event):
+    """'all day', '3:00 PM - 5:30 PM', or with dates when it spans days."""
+    if event.all_day:
+        if event.start == event.end:
+            return "all day"
+        return f"all day ({event.start.month}/{event.start.day} - {event.end.month}/{event.end.day})"
+    if event.start.date() == event.end.date():
+        return f"{_clock(event.start)} - {_clock(event.end)}"
+    return (f"{event.start.month}/{event.start.day} {_clock(event.start)} - "
+            f"{event.end.month}/{event.end.day} {_clock(event.end)}")
+
+
+def _read_personal_calendars(dj_name, start, end, fetch):
+    """({day: [CalEvent]}, error text). A machine with no CalDAV setup reads
+    as nothing and no error; a read that failed returns the error."""
+    import calendar_read
+    fetch = fetch or calendar_read.fetch_events_by_day
+    try:
+        by_day = fetch(PERSONAL_CALENDARS[dj_name], start, end)
+        kept = {day: [e for e in events if not (e.all_day and e.calendar in ALL_DAY_IS_A_REMINDER)]
+                for day, events in by_day.items()}
+        return {day: events for day, events in kept.items() if events}, ""
+    except calendar_read.CalendarNotConfigured:
+        return {}, ""
+    except calendar_read.CalendarReadError as e:
+        return {}, f"Could not read {dj_name}'s calendars ({e})"
+
+
+def personal_calendar_lines(dj_name, date_obj, matrix_value, fetch=None):
+    """Lines to show under a DJ's line on a single-date check, as
+    [(text, palette kind)]. Empty for a DJ with no calendars listed or a day
+    with nothing on. Warns when an all-day OUT is on the calendar and the
+    Matrix cell does not say OUT."""
+    if dj_name not in PERSONAL_CALENDARS:
+        return []
+    day = _as_date(date_obj)
+    by_day, error = _read_personal_calendars(dj_name, day, day, fetch)
+    if error:
+        return [(f"   {error}", "warn")]
+    events = by_day.get(day, [])
+    if not events:
+        return []
+
+    whens = [_event_when(e) for e in events]
+    cal_width = max(len(e.calendar) for e in events)
+    when_width = max(len(w) for w in whens)
+    lines = [(f"   On {dj_name}'s calendars:", "dim")]
+    for event, when in zip(events, whens):
+        lines.append((f"     {event.calendar.ljust(cal_width)}   {when.ljust(when_width)}   {event.summary}", "dim"))
+
+    if "OUT" not in str(matrix_value).upper():
+        for event in events:
+            if event.all_day and _OUT_TITLE.search(event.summary):
+                lines.append((f"   ⚠️  \"{event.summary}\" is on the {event.calendar} calendar "
+                              f"but the Matrix does not show OUT", "warn"))
+    return lines
+
+
+def personal_calendar_notes(start_date, end_date, fetch=None):
+    """One read per DJ for a whole range. Returns ({dj: {day: text}}, error
+    text), where text is that day's events on one line."""
+    start, end = _as_date(start_date), _as_date(end_date)
+    notes, errors = {}, []
+    for dj_name in PERSONAL_CALENDARS:
+        by_day, error = _read_personal_calendars(dj_name, start, end, fetch)
+        if error:
+            errors.append(error)
+        if by_day:
+            notes[dj_name] = {
+                day: "; ".join(f"{e.calendar}: {e.summary} ({_event_when(e)})" for e in events)
+                for day, events in by_day.items()}
+    return notes, "; ".join(errors)
+
+
+def personal_note(notes, dj_name, date_obj):
+    """That DJ's one-line note for that day, or ''."""
+    return notes.get(dj_name, {}).get(_as_date(date_obj), "")
+
+
+def mark_personal_conflicts(dj_names, date_obj, notes):
+    """The same list with a star on each DJ who has something on that day."""
+    return [f"{name}*" if personal_note(notes, name, date_obj) else name for name in dj_names]

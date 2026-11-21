@@ -14,15 +14,18 @@ import unittest
 from datetime import date, datetime, timezone
 
 import calendar_read
-from calendar_read import CalendarReadError, fetch_events, fetch_day_events, event_local_date
+from calendar_read import (CalendarReadError, CalendarNotConfigured, CalEvent, fetch_events,
+                           fetch_day_events, fetch_events_by_day, event_local_date)
 
 
 class FakeEvent:
-    def __init__(self, summary, dtstart, uid=None):
+    def __init__(self, summary, dtstart, uid=None, dtend=None):
         from icalendar import Event
         self.icalendar_component = Event()
         self.icalendar_component.add("summary", summary)
         self.icalendar_component.add("dtstart", dtstart)
+        if dtend:
+            self.icalendar_component.add("dtend", dtend)
         if uid:
             self.icalendar_component.add("uid", uid)
 
@@ -118,6 +121,102 @@ class TestFetchEvents(unittest.TestCase):
 
     def test_known_calendars_have_urls(self):
         for name in ("Gigs", "Wedding Faires", "Unavailable"):
+            self.assertIn(name, calendar_read.CALENDAR_URLS)
+
+
+PT = calendar_read.TIMEZONE
+
+
+class TestFetchEventsByDay(unittest.TestCase):
+    """Paul's own calendars, for the availability checker: every event that
+    covers a day, with its calendar and times."""
+
+    def fetch(self, cals, start, end):
+        return fetch_events_by_day(list(cals), start, end, connect=connect_to(cals))
+
+    def test_timed_event_carries_calendar_and_local_times(self):
+        cals = {"Paul": FakeCalendar([FakeEvent(
+            "[PB] Babysit",
+            datetime(2026, 11, 19, 23, 0, tzinfo=timezone.utc),      # 3:00 PM PST
+            dtend=datetime(2026, 11, 20, 1, 30, tzinfo=timezone.utc))])}  # 5:30 PM PST
+        result = self.fetch(cals, date(2026, 11, 19), date(2026, 11, 19))
+        self.assertEqual(result, {date(2026, 11, 19): [CalEvent(
+            "Paul", "[PB] Babysit", False,
+            datetime(2026, 11, 19, 15, 0, tzinfo=PT), datetime(2026, 11, 19, 17, 30, tzinfo=PT))]})
+
+    def test_all_day_event_end_is_exclusive(self):
+        # An all-day event on 11/20 is stored as 11/20 to 11/21.
+        cals = {"BIG FUN": FakeCalendar([FakeEvent("[PB] OUT", date(2026, 11, 20),
+                                                   dtend=date(2026, 11, 21))])}
+        result = self.fetch(cals, date(2026, 11, 19), date(2026, 11, 22))
+        self.assertEqual(list(result), [date(2026, 11, 20)])
+        self.assertTrue(result[date(2026, 11, 20)][0].all_day)
+
+    def test_multi_day_event_is_on_every_day_it_covers(self):
+        cals = {"Paul": FakeCalendar([FakeEvent("Trip", date(2026, 11, 20),
+                                                dtend=date(2026, 11, 23))])}
+        result = self.fetch(cals, date(2026, 11, 19), date(2026, 11, 30))
+        self.assertEqual(sorted(result), [date(2026, 11, 20), date(2026, 11, 21), date(2026, 11, 22)])
+
+    def test_event_started_before_the_range_still_shows(self):
+        cals = {"Paul": FakeCalendar([FakeEvent("Trip", date(2026, 11, 18),
+                                                dtend=date(2026, 11, 23))])}
+        result = self.fetch(cals, date(2026, 11, 20), date(2026, 11, 20))
+        self.assertEqual(list(result), [date(2026, 11, 20)])
+
+    def test_timed_event_ending_at_midnight_is_not_on_the_next_day(self):
+        cals = {"Paul": FakeCalendar([FakeEvent(
+            "Late", datetime(2026, 11, 20, 20, 0, tzinfo=PT),
+            dtend=datetime(2026, 11, 21, 0, 0, tzinfo=PT))])}
+        result = self.fetch(cals, date(2026, 11, 20), date(2026, 11, 21))
+        self.assertEqual(list(result), [date(2026, 11, 20)])
+
+    def test_no_end_is_a_single_day(self):
+        cals = {"Paul": FakeCalendar([FakeEvent("Note", date(2026, 11, 20))])}
+        result = self.fetch(cals, date(2026, 11, 19), date(2026, 11, 22))
+        self.assertEqual(list(result), [date(2026, 11, 20)])
+
+    def test_all_day_first_then_by_start_time(self):
+        cals = {
+            "Paul": FakeCalendar([
+                FakeEvent("Babysit", datetime(2026, 11, 20, 15, 0, tzinfo=PT),
+                          dtend=datetime(2026, 11, 20, 17, 30, tzinfo=PT)),
+                FakeEvent("Lunch", datetime(2026, 11, 20, 11, 30, tzinfo=PT),
+                          dtend=datetime(2026, 11, 20, 12, 30, tzinfo=PT))]),
+            "BIG FUN": FakeCalendar([FakeEvent("[PB] OUT", date(2026, 11, 20),
+                                               dtend=date(2026, 11, 21))]),
+        }
+        result = self.fetch(cals, date(2026, 11, 20), date(2026, 11, 20))
+        self.assertEqual([e.summary for e in result[date(2026, 11, 20)]],
+                         ["[PB] OUT", "Lunch", "Babysit"])
+
+    def test_nothing_on_the_calendars_is_an_empty_dict(self):
+        result = self.fetch({"Paul": FakeCalendar([])}, date(2026, 11, 20), date(2026, 11, 20))
+        self.assertEqual(result, {})
+
+    def test_search_failure_raises(self):
+        cals = {"Paul": FakeCalendar(error=ConnectionError("server down"))}
+        with self.assertRaises(CalendarReadError) as ctx:
+            self.fetch(cals, date(2026, 11, 20), date(2026, 11, 20))
+        self.assertNotIsInstance(ctx.exception, CalendarNotConfigured)
+
+    def test_missing_credentials_raise_not_configured(self):
+        # A machine with no Keychain entry (Henry's) is not a failed read.
+        def no_credentials(names):
+            raise CalendarNotConfigured("No CalDAV credentials")
+        with self.assertRaises(CalendarNotConfigured):
+            fetch_events_by_day(["Paul"], date(2026, 11, 20), date(2026, 11, 20),
+                                connect=no_credentials)
+
+    def test_missing_library_raises_not_configured(self):
+        def no_library(names):
+            raise ImportError("No module named 'caldav'")
+        with self.assertRaises(CalendarNotConfigured):
+            fetch_events_by_day(["Paul"], date(2026, 11, 20), date(2026, 11, 20),
+                                connect=no_library)
+
+    def test_pauls_calendars_have_urls(self):
+        for name in ("Paul", "BIG FUN"):
             self.assertIn(name, calendar_read.CALENDAR_URLS)
 
 

@@ -58,6 +58,12 @@ from dj_core import (
     dj_status,
     aag_column_text,
     dj_range_bucket,
+    personal_calendar_lines,
+    personal_calendar_notes,
+    personal_note,
+    mark_personal_conflicts,
+    PERSONAL_CALENDARS,
+    PERSONAL_MARK_FOOTNOTE,
 )
 
 
@@ -136,6 +142,8 @@ def check_availability(sheet_name, month_day_to_check, service, spreadsheet, spr
                     nearby = get_nearby_bookings_for_dj(label, date_obj, sheet_name, service, spreadsheet, spreadsheet_id)
                     status = dj_status(label, value, date_obj, sheet_name, gig, nearby, aag_couple=data.get('aag_couple', ''))
                 response.append(render_dj_line(label, status))
+                for text, kind in personal_calendar_lines(label, date_obj, value):
+                    response.append(f"{getattr(Fore, _KIND_COLOR[kind])}{text}{Style.RESET_ALL}")
     
     response.append("\nAVAILABILITY SUMMARY:")
     response.append(f"Confirmed bookings: {availability['booked_count']}")
@@ -248,6 +256,10 @@ def query_date_range(sheet_name, start_date_str, end_date_str, day_filter, servi
     if all_data is None:
         return f"{Fore.RED}Error fetching data from {sheet_name} sheet.{Style.RESET_ALL}"
     
+    # The DJs' own calendars, one read for the whole range
+    personal_notes, calendar_error = personal_calendar_notes(start_date, end_date)
+    any_marked = False
+
     results = []
     
     for date_info in all_data:
@@ -276,6 +288,10 @@ def query_date_range(sheet_name, start_date_str, end_date_str, day_filter, servi
                 stefano_clean = str(stefano_value).replace(" (BOLD)", "").strip() if stefano_value else ""
                 if not stefano_clean and 'Stefano' not in available_djs:
                     available_djs.append('Stefano [MAYBE]')
+
+                marked_djs = mark_personal_conflicts(available_djs, date_obj, personal_notes)
+                any_marked = any_marked or marked_djs != available_djs
+                available_djs = marked_djs
                 
                 results.append({
                     'date': date_info['date'],
@@ -304,6 +320,12 @@ def query_date_range(sheet_name, start_date_str, end_date_str, day_filter, servi
         
         dj_list = f" ({', '.join(result['available_djs'])})" if result['available_djs'] else ""
         output.append(f"{result['date']}: {color}{spots} spot(s) available{Style.RESET_ALL}{dj_list}")
+
+    if any_marked:
+        output.append("")
+        output.append(PERSONAL_MARK_FOOTNOTE)
+    if calendar_error:
+        output.append(f"\n{Fore.YELLOW}{calendar_error}{Style.RESET_ALL}")
     
     output.append("\n" + "=" * 50)
     return "\n".join(output)
@@ -333,6 +355,11 @@ def query_dj_availability(sheet_name, dj_name, start_date_str, end_date_str, ser
     if all_data is None:
         return f"{Fore.RED}Error fetching data from {sheet_name} sheet.{Style.RESET_ALL}"
     
+    # This DJ's own calendars, one read for the whole range
+    personal_notes, calendar_error = {}, ""
+    if dj_name in PERSONAL_CALENDARS:
+        personal_notes, calendar_error = personal_calendar_notes(start_date, end_date)
+
     available_dates = []
     booked_dates = []
     backup_dates = []
@@ -351,10 +378,10 @@ def query_dj_availability(sheet_name, dj_name, start_date_str, end_date_str, ser
             booked_date_infos.append(date_info)
         elif bucket == "backup":
             backup_dates.append(date_info['date'])
-        elif bucket == "maybe":
-            available_dates.append(f"{date_info['date']} [MAYBE]")
-        elif bucket == "available":
-            available_dates.append(date_info['date'])
+        elif bucket in ("maybe", "available"):
+            line = date_info['date'] + (" [MAYBE]" if bucket == "maybe" else "")
+            note = personal_note(personal_notes, dj_name, date_info['date_obj'])
+            available_dates.append(f"{line}   {note}" if note else line)
     
     # Second pass: look up venue names from gig database for booked dates
     if booked_date_infos:
@@ -400,6 +427,9 @@ def query_dj_availability(sheet_name, dj_name, start_date_str, end_date_str, ser
             output.append(f"  {date}")
     else:
         output.append("  None")
+
+    if calendar_error:
+        output.append(f"\n{Fore.YELLOW}{calendar_error}{Style.RESET_ALL}")
     
     output.append("\n" + "=" * 50)
     return "\n".join(output)

@@ -12,6 +12,7 @@ caller can't mistake "couldn't read the calendar" for "nothing on the calendar."
 """
 
 import datetime
+from collections import namedtuple
 from zoneinfo import ZoneInfo
 
 TIMEZONE = ZoneInfo("America/Los_Angeles")
@@ -26,9 +27,28 @@ CALENDAR_URLS = {
     "Unavailable": _HOME + "E7F24781-3EAF-44E2-8264-B5CC03D48A81/",
 }
 
+# Paul's own calendars, in his own calendar home on the same server. The
+# availability checker lists what is on them (Paul, 2026-11-20). "BIG FUN" is
+# the events calendar; the task list of the same name is a different URL.
+_PAUL_HOME = "https://caldav.love2tap.com/calendars/__uids__/7E95F965-A066-4943-8E35-FAD23D5C3FDE/"
+CALENDAR_URLS.update({
+    "Paul": _PAUL_HOME + "3B845CA3-41DA-4CF6-9B32-104FF351ED29/",
+    "BIG FUN": _PAUL_HOME + "6BC7EFDA-3A3D-4277-A179-43146D3A1623/",
+})
+
 
 class CalendarReadError(Exception):
     """The calendar could not be read. Never means 'no events'."""
+
+
+class CalendarNotConfigured(CalendarReadError):
+    """This machine has no CalDAV credentials or library, so there is nothing
+    to read from. Different from a read that was tried and failed."""
+
+
+# One event on one calendar. For a timed event start and end are Pacific
+# datetimes; for an all-day event they are dates and end is the last day.
+CalEvent = namedtuple("CalEvent", "calendar summary all_day start end")
 
 
 def _connect(names):
@@ -40,7 +60,7 @@ def _connect(names):
     username = keyring.get_password(CALDAV_SERVICE, "username")
     password = keyring.get_password(CALDAV_SERVICE, "password")
     if not all([url, username, password]):
-        raise RuntimeError("No CalDAV credentials found in Keychain (bigfun-caldav). Run setup_caldav.py first.")
+        raise CalendarNotConfigured("No CalDAV credentials found in Keychain (bigfun-caldav). Run setup_caldav.py first.")
 
     client = caldav.DAVClient(url=url, username=username, password=password)
     return {name: caldav.Calendar(client=client, url=CALENDAR_URLS[name]) for name in names}
@@ -88,6 +108,69 @@ def fetch_events(calendar_names, start_date, end_date, connect=_connect):
         raise CalendarReadError(f"{type(e).__name__}: {e}") from e
 
     return sorted(events)
+
+
+def _local(dt):
+    """A timed event's start or end as a Pacific datetime."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=TIMEZONE)
+    return dt.astimezone(TIMEZONE)
+
+
+def _to_cal_event(calendar_name, vevent):
+    """(CalEvent, first day, last day) for one VEVENT."""
+    summary = str(vevent.get("summary", ""))
+    start = vevent.get("dtstart").dt
+    end = vevent.get("dtend").dt if vevent.get("dtend") else None
+
+    if not isinstance(start, datetime.datetime):
+        # All-day: DTEND is the day after the last day.
+        last = end - datetime.timedelta(days=1) if end and end > start else start
+        return CalEvent(calendar_name, summary, True, start, last), start, last
+
+    start = _local(start)
+    end = _local(end) if end else start
+    # An event ending at midnight is not on the day that starts then.
+    last = max(start, end - datetime.timedelta(microseconds=1)).date()
+    return CalEvent(calendar_name, summary, False, start, end), start.date(), last
+
+
+def fetch_events_by_day(calendar_names, start_date, end_date, connect=_connect):
+    """{day: [CalEvent, ...]} for every day in start_date..end_date (inclusive)
+    that has something on the named calendars. A multi-day event is listed on
+    each day it covers. All-day events come first, then timed ones by start.
+    Days with nothing are left out. Recurring events are expanded.
+
+    Raises CalendarNotConfigured when this machine has no credentials or no
+    CalDAV library, and CalendarReadError when the read was tried and failed.
+    """
+    unknown = [n for n in calendar_names if n not in CALENDAR_URLS]
+    if unknown:
+        raise CalendarReadError(f"Unknown calendar(s): {', '.join(unknown)}")
+
+    start = datetime.datetime.combine(start_date, datetime.time.min, tzinfo=TIMEZONE)
+    end = datetime.datetime.combine(end_date + datetime.timedelta(days=1), datetime.time.min, tzinfo=TIMEZONE)
+
+    by_day = {}
+    try:
+        calendars = connect(calendar_names)
+        for name in calendar_names:
+            for event in calendars[name].search(start=start, end=end, event=True, expand=True):
+                cal_event, first, last = _to_cal_event(name, event.icalendar_component)
+                day = max(first, start_date)
+                while day <= min(last, end_date):
+                    by_day.setdefault(day, []).append(cal_event)
+                    day += datetime.timedelta(days=1)
+    except CalendarNotConfigured:
+        raise
+    except ImportError as e:
+        raise CalendarNotConfigured(f"{type(e).__name__}: {e}") from e
+    except Exception as e:
+        raise CalendarReadError(f"{type(e).__name__}: {e}") from e
+
+    for events in by_day.values():
+        events.sort(key=lambda e: (0, e.summary) if e.all_day else (1, e.start, e.summary))
+    return by_day
 
 
 def fetch_day_events(calendar_name, day, connect=_connect):

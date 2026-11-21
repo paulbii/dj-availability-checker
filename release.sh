@@ -54,7 +54,7 @@ fi
 echo "== commit"
 git commit -m "$MSG
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>"
 
 echo "== push"
 git push

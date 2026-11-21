@@ -25,6 +25,12 @@ from dj_core import (
     get_bulk_availability_data,
     auto_clear_stale_cache,
     get_gig_database_bookings,
+    personal_calendar_lines,
+    personal_calendar_notes,
+    personal_note,
+    mark_personal_conflicts,
+    PERSONAL_CALENDARS,
+    PERSONAL_MARK_FOOTNOTE,
     get_venue_cautions,
     dj_status,
     aag_column_text,
@@ -829,6 +835,8 @@ class Api:
                         nearby = get_nearby_bookings_for_dj(label, date_obj, self.sheet_name, self.service, self.spreadsheet, self.spreadsheet_id)
                         status = dj_status(label, value, date_obj, self.sheet_name, gig, nearby, aag_couple=data.get('aag_couple', ''))
                     lines.append(self._render_dj_line(label, status))
+                    for text, kind in personal_calendar_lines(label, date_obj, value):
+                        lines.append({"text": text, "cls": kind})
 
             # Summary
             lines.append({"text": "", "cls": "divider"})
@@ -900,6 +908,10 @@ class Api:
             if all_data is None:
                 return [{"text": f"Error fetching data from {self.sheet_name} sheet.", "cls": "red"}]
 
+            # The DJs' own calendars, one read for the whole range
+            personal_notes, calendar_error = personal_calendar_notes(start_date, end_date)
+            any_marked = False
+
             day_filter = day_filter or None
             results = []
             for date_info in all_data:
@@ -923,6 +935,9 @@ class Api:
                         sc = str(sv).replace(" (BOLD)", "").strip() if sv else ""
                         if not sc and 'Stefano' not in available_djs:
                             available_djs.append('Stefano [MAYBE]')
+                        marked_djs = mark_personal_conflicts(available_djs, date_obj, personal_notes)
+                        any_marked = any_marked or marked_djs != available_djs
+                        available_djs = marked_djs
                         results.append({
                             'date': date_info['date'],
                             'spots': avail,
@@ -947,6 +962,13 @@ class Api:
                     cls = "green" if r['spots'] >= 2 else ("yellow" if r['spots'] == 1 else "red")
                     lines.append({"text": f"{r['date']}: {r['spots']} spot(s) available{dj_list}", "cls": cls})
 
+            if any_marked:
+                lines.append({"text": "", "cls": "divider"})
+                lines.append({"text": PERSONAL_MARK_FOOTNOTE, "cls": "dim"})
+            if calendar_error:
+                lines.append({"text": "", "cls": "divider"})
+                lines.append({"text": calendar_error, "cls": "warn"})
+
             return lines
 
         except Exception as e:
@@ -969,6 +991,11 @@ class Api:
             if all_data is None:
                 return [{"text": f"Error fetching data from {self.sheet_name} sheet.", "cls": "red"}]
 
+            # This DJ's own calendars, one read for the whole range
+            personal_notes, calendar_error = {}, ""
+            if dj_name in PERSONAL_CALENDARS:
+                personal_notes, calendar_error = personal_calendar_notes(start_date, end_date)
+
             available_dates = []
             booked_dates = []
             backup_dates = []
@@ -984,10 +1011,10 @@ class Api:
                     booked_date_infos.append(date_info)
                 elif bucket == "backup":
                     backup_dates.append(date_info['date'])
-                elif bucket == "maybe":
-                    available_dates.append(f"{date_info['date']} [MAYBE]")
-                elif bucket == "available":
-                    available_dates.append(date_info['date'])
+                elif bucket in ("maybe", "available"):
+                    line = date_info['date'] + (" [MAYBE]" if bucket == "maybe" else "")
+                    note = personal_note(personal_notes, dj_name, date_info['date_obj'])
+                    available_dates.append(f"{line}   {note}" if note else line)
 
             # Look up venues for booked dates
             for date_info in booked_date_infos:
@@ -1025,6 +1052,10 @@ class Api:
                 lines.append({"text": f"  {d}", "cls": "blue"})
             if not backup_dates:
                 lines.append({"text": "  None", "cls": "dim"})
+
+            if calendar_error:
+                lines.append({"text": "", "cls": "divider"})
+                lines.append({"text": calendar_error, "cls": "warn"})
 
             return lines
 
